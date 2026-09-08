@@ -1,0 +1,72 @@
+quest attack(attacker_name, defender_name):
+    narrate attacker_name + " attacks " + defender_name + "!"
+    ability roll_to_hit = roll(d20)
+    attempt (roll_to_hit >= 10):
+        ability dmg = roll(d6)
+        narrate attacker_name + " hits for " + dmg + " damage!"
+        reward dmg
+    fail:
+        narrate attacker_name + " misses!"
+        reward 0
+
+
+quest display_hp(names, hps, total):
+    narrate "HP:"
+    for i in party(total):
+        narrate names.member_i + ": " + hps.member_i
+
+
+
+ 
+quest combat():
+    ability num_fighters = player("How many fighters?")
+
+    ability num_goblins = player("How many goblins?")
+
+    ability total = num_fighters + num_goblins
+
+    ability names = []
+    ability hps = []
+
+    -- PRE-SIZE LISTS --
+    adventure i in party(total):
+        names.member_i = ""
+        hps.member_i = 0
+
+    -- FILL FIGHTERS --
+    adventure i in party(num_fighters):
+        names.member_i = "Fighter_" + str(i)
+        hps.member_i = 20
+
+    -- FILL GOBLINS --
+    adventure g in party(num_goblins):
+        ability idx = num_fighters + g
+        names.member_idx = "Goblin_" + str(g)
+        hps.member_idx = 12
+
+    ability current = 0
+
+    while honor:
+        embark display_hp(names, hps, total)
+
+        ability attacker = names.member_current
+
+        ability defender_index = (current + 1) % total
+        ability defender = names.member_defender_index
+
+        ability dmg = embark attack(attacker, defender)
+
+        hps.member_defender_index = hps.member_defender_index - dmg
+        hps.member_defender_index = max(hps.member_defender_index, 0)
+
+        attempt (hps.member_defender_index <= 0):
+            narrate defender + " falls!"
+            embark display_hp(names, hps, total)
+            reward honor
+
+        ability pause = player("Press enter for next round.")
+
+        current = (current + 1) % total
+
+
+embark combat()

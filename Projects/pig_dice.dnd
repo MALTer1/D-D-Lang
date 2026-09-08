@@ -1,0 +1,31 @@
+quest roll_dice():
+    reward roll(d6)
+
+ability num_players = 2
+ability Scores = [0] * num_players
+ability target_score = 20
+
+quest play_turn(player_num):
+    init Scores
+    ability turn_score = 0
+    while honor:
+        ability the_roll = embark roll_dice()
+        narrate "Player " + (player_num + 1) + " rolled " + the_roll
+        attempt (the_roll == 1):
+            narrate "Rolled a 1!"
+            reward 0
+        fail:
+            turn_score += the_roll
+            reward turn_score
+
+ability player_num = 0
+while max(Scores) < target_score:
+    ability gained = embark play_turn(player_num)
+    Scores.member_player_num += gained
+    narrate "Scores now:"
+    for p in party(num_players):
+        narrate "Player " + (p + 1) + ": " + Scores.member_p
+    attempt (Scores.member_player_num >= target_score):
+        narrate "Player " + (player_num + 1) + " wins!"
+        quit
+    player_num = (player_num + 1) % num_players

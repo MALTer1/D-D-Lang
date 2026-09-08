@@ -1,0 +1,22 @@
+ability a = player("First Number: ")
+ability b = player("Second Number: ")
+ability operation = player("Operation: ")
+
+quest Total():
+    init a, b, operation
+    ability sum = 0
+    attempt (operation == "*"):
+        sum = a * b
+        narrate(sum)
+    or_attempt (operation == "+"):
+        sum = a + b
+        narrate(sum)
+    or_attempt (operation == "-"):
+        sum = a - b
+        narrate(sum)
+    fail:
+        sum = a / b
+        narrate(sum)
+            
+
+embark Total()

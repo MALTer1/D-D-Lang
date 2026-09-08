@@ -1,0 +1,30 @@
+homebrew character Employee:
+    role = "Analyst"
+    salary_grade = 5
+    STATS:
+        STR = 16
+        DEX = 12
+        CON = 14
+        INT = 18
+        WIS = 13
+        CHA = 11
+        extra LUCK = 8
+
+summon worker = Employee()
+
+narrate "Role: " + worker.role
+narrate "STR number: " + worker.STATS.STR.number
+narrate "STR mod: " + worker.STATS.STR.mod
+
+narrate worker.force.mod(+, 10)
+narrate worker.endure.mod(100, 3)
+narrate worker.perceive.mod([70, 80, 90])
+
+worker.STATS.LUCK.mod = 5
+narrate worker.STATS.LUCK.mod
+
+ability check = worker.solve.mod \_(15)
+attempt (check == honor):
+    narrate "Passed the check!"
+fail:
+    narrate "Failed the check."
