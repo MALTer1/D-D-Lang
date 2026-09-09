@@ -1,7 +1,9 @@
 import sys
 from lexer import tokenize
 from parser import parse
-from interpreter import Interpreter, DMError
+from interpreter import DMError
+from v5_runtime import V5Interpreter, expand_v5_syntax
+
 
 def main():
     if len(sys.argv) < 2:
@@ -13,11 +15,13 @@ def main():
         source = f.read()
 
     try:
+        source = expand_v5_syntax(source)
         tokens = tokenize(source)
         ast = parse(tokens)
-        Interpreter().run(ast)
+        V5Interpreter().run(ast)
     except (SyntaxError, DMError) as e:
         print(f"DM: {e}")
+
 
 if __name__ == "__main__":
     main()
