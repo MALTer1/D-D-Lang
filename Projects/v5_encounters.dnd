@@ -1,0 +1,8 @@
+-- D&D Lang v5 encounter regression --
+
+encounter GoblinRaid(name):
+    narrate name
+    reward 7
+
+ability result = fight GoblinRaid("The cave")
+narrate result
