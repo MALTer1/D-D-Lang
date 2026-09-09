@@ -1,0 +1,30 @@
+-- D&D Lang v5 list + adventure regression --
+
+ability scores = [10, 20]
+scores.member_4 = 50
+append(scores, 60)
+push(scores, 70)
+ability popped = pop(scores)
+ability has_twenty = contains(scores, 20)
+ability twenty_index = index(scores, 20)
+
+quest double(x):
+    reward x * 2
+
+ability doubled = map([1, 2, 3], double)
+
+quest is_big(x):
+    reward x > 15
+
+ability big_scores = filter(scores, is_big)
+
+narrate scores
+narrate doubled
+narrate big_scores
+narrate popped
+narrate has_twenty
+narrate twenty_index
+
+ability total = 3
+adventure i in total:
+    narrate i
