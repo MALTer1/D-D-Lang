@@ -720,3 +720,202 @@ def coerce_input(raw):
         return int(raw)
     except ValueError:
         return raw
+
+
+# ---------------------------------------------------------------------------
+# v5 core additions
+# ---------------------------------------------------------------------------
+
+_ORIGINAL_EXEC_STATEMENT = Interpreter.exec_statement
+_ORIGINAL_EVAL_EXPR = Interpreter.eval_expr
+_ORIGINAL_CALL_BUILTIN = Interpreter.call_builtin
+_ORIGINAL_RUN = Interpreter.run
+
+
+def _address_statements(program_ast):
+    """Attach the same major.minor addresses shown by the IDE gutter.
+
+    Major numbers belong to top-level source lines. All indented source lines
+    under that major share its major number and receive increasing minors.
+    Multi-line control constructs reserve their visible `or_attempt`, `fail`,
+    and `consider` header lines so executable lines stay aligned with the IDE.
+    """
+    major = -1
+
+    def process_block(statements, major_number, counter):
+        for stmt in statements:
+            stmt["address"] = f"{major_number}.{counter[0]}"
+            counter[0] += 1
+            kind = stmt.get("type")
+
+            if kind in ("Adventure", "While", "ForParty", "QuestDef"):
+                process_block(stmt.get("body", []), major_number, counter)
+            elif kind == "Attempt":
+                clauses = stmt.get("clauses", [])
+                if clauses:
+                    process_block(clauses[0].get("body", []), major_number, counter)
+                    for clause in clauses[1:]:
+                        counter[0] += 1  # or_attempt header
+                        process_block(clause.get("body", []), major_number, counter)
+                if stmt.get("fail_body") is not None:
+                    counter[0] += 1  # fail header
+                    process_block(stmt.get("fail_body", []), major_number, counter)
+            elif kind == "Submit":
+                process_block(stmt.get("body", []), major_number, counter)
+                for clause in stmt.get("considers", []):
+                    counter[0] += 1  # consider header
+                    process_block(clause.get("body", []), major_number, counter)
+
+    for stmt in program_ast.get("body", []):
+        major += 1
+        stmt["address"] = str(major)
+        process_block(stmt.get("body", []), major, [0])
+        if stmt.get("type") == "Attempt":
+            # The normal process above handled Attempt bodies with a fresh
+            # counter, so restore the address stream by explicitly rebuilding
+            # this major block below.
+            counter = [0]
+            def process_attempt_body(attempt_stmt):
+                clauses = attempt_stmt.get("clauses", [])
+                if clauses:
+                    process_block(clauses[0].get("body", []), major, counter)
+                    for clause in clauses[1:]:
+                        counter[0] += 1
+                        process_block(clause.get("body", []), major, counter)
+                if attempt_stmt.get("fail_body") is not None:
+                    counter[0] += 1
+                    process_block(attempt_stmt.get("fail_body", []), major, counter)
+            process_attempt_body(stmt)
+
+
+def _v5_run(self, program_ast):
+    _address_statements(program_ast)
+    return _ORIGINAL_RUN(self, program_ast)
+
+
+def _v5_exec_statement(self, stmt, env):
+    try:
+        if stmt.get("type") == "Assignment":
+            target = stmt["target"]
+            if target.get("type") == "FieldAccess":
+                obj = self.eval_expr(target["obj"], env)
+                field = target["field"]
+                if isinstance(obj, list) and field.startswith("member_"):
+                    value = self.eval_expr(stmt["value"], env)
+                    index = self.resolve_member_index(field, env)
+                    if index < 0:
+                        raise DMError("A list position can't be negative.", stmt.get("address"))
+                    if index >= len(obj):
+                        obj.extend([None] * (index + 1 - len(obj)))
+                    obj[index] = value
+                    return
+        return _ORIGINAL_EXEC_STATEMENT(self, stmt, env)
+    except DMError as exc:
+        # Preserve the most specific inner address when a nested call already
+        # supplied one; otherwise attach the current executable source address.
+        text = str(exc)
+        if " (line " not in text and stmt.get("address") is not None:
+            prefix = "That's not within your ability"
+            message = text[len(prefix):].lstrip(": ") if text.startswith(prefix) else text
+            raise DMError(message, stmt["address"]) from None
+        raise
+
+
+def _v5_eval_expr(self, node, env):
+    if node.get("type") == "Identifier" and node.get("name") == "none":
+        return None
+    return _ORIGINAL_EVAL_EXPR(self, node, env)
+
+
+def _v5_call_builtin(self, name, arg_nodes, env):
+    if name in {"append", "push", "pop", "map", "filter", "contains", "index"}:
+        return _v5_list_builtin(self, name, arg_nodes, env)
+    return _ORIGINAL_CALL_BUILTIN(self, name, arg_nodes, env)
+
+
+def _v5_list_builtin(self, name, arg_nodes, env):
+    args = [self.eval_expr(node, env) for node in arg_nodes]
+
+    if name in {"append", "push"}:
+        if len(args) != 2 or not isinstance(args[0], list):
+            raise DMError(f"'{name}' needs a list and a value.")
+        args[0].append(args[1])
+        return args[0]
+
+    if name == "pop":
+        if not (1 <= len(args) <= 2) or not isinstance(args[0], list):
+            raise DMError("'pop' needs a list, and can optionally take an index.")
+        values = args[0]
+        if not values:
+            raise DMError("You can't pop from an empty list.")
+        index = -1 if len(args) == 1 else int(args[1])
+        if index < 0:
+            index += len(values)
+        if index < 0 or index >= len(values):
+            raise DMError(f"There's no item at position {index} in that list.")
+        return values.pop(index)
+
+    if name in {"contains", "index"}:
+        if len(args) != 2 or not isinstance(args[0], list):
+            raise DMError(f"'{name}' needs a list and a value.")
+        values, needle = args
+        if name == "contains":
+            return needle in values
+        try:
+            return values.index(needle)
+        except ValueError:
+            return -1
+
+    if name in {"map", "filter"}:
+        if len(arg_nodes) != 2:
+            raise DMError(f"'{name}' needs a list and an operation.")
+        values = self.eval_expr(arg_nodes[0], env)
+        if not isinstance(values, list):
+            raise DMError(f"'{name}' needs a list as its first argument.")
+
+        operation = arg_nodes[1]
+        if operation.get("type") == "Identifier":
+            op_name = operation["name"]
+        elif operation.get("type") == "StringLiteral":
+            op_name = operation["value"]
+        else:
+            raise DMError(f"'{name}' needs a quest name or Scroll as its operation.")
+
+        if op_name not in self.quests:
+            raise DMError(f"There's no quest called '{op_name}'.")
+
+        result = []
+        for item in values:
+            transformed = self.call_quest(op_name, [{
+                "type": "NumberLiteral", "value": item
+            }] if isinstance(item, (int, float)) and not isinstance(item, bool) else [{
+                "type": "BoolLiteral", "value": item
+            }] if isinstance(item, bool) else [{
+                "type": "StringLiteral", "value": item
+            }] if isinstance(item, str) else [{
+                "type": "ListLiteral", "elements": [
+                    {"type": "NumberLiteral", "value": v} if isinstance(v, (int, float)) and not isinstance(v, bool)
+                    else {"type": "BoolLiteral", "value": v} if isinstance(v, bool)
+                    else {"type": "StringLiteral", "value": v}
+                    for v in item
+                ]
+            }], env)
+            if name == "map" or bool(transformed):
+                result.append(transformed)
+        return result
+
+    raise DMError(f"There's no list built-in called '{name}'.")
+
+
+def _v5_to_scroll(value):
+    if value is None:
+        return "none"
+    return _ORIGINAL_TO_SCROLL(value)
+
+
+_ORIGINAL_TO_SCROLL = to_scroll
+Interpreter.run = _v5_run
+Interpreter.exec_statement = _v5_exec_statement
+Interpreter.eval_expr = _v5_eval_expr
+Interpreter.call_builtin = _v5_call_builtin
+to_scroll = _v5_to_scroll
