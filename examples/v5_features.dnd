@@ -1,0 +1,37 @@
+-- D&D Lang v5 feature smoke example --
+
+ability scores = [10, 20]
+scores.member_4 = 50
+append(scores, 60)
+push(scores, 70)
+ability last = pop(scores)
+ability has_twenty = contains(scores, 20)
+ability first_twenty = index(scores, 20)
+
+quest double(x):
+    reward x * 2
+
+ability doubled = map(scores, double)
+
+quest is_big(x):
+    reward x > 25
+
+ability big_scores = filter(scores, is_big)
+
+narrate scores
+narrate doubled
+narrate big_scores
+narrate last
+narrate has_twenty
+narrate first_twenty
+
+ability total = 3
+adventure i in total:
+    narrate i
+
+encounter GoblinRaid(name):
+    narrate name
+    reward 7
+
+ability result = fight GoblinRaid("The cave")
+narrate result
