@@ -1,0 +1,7 @@
+-- D&D Lang v5 major.minor diagnostic regression --
+
+ability hp = 10
+attempt (hp > 0):
+    hp = hp / 0
+
+narrate hp
