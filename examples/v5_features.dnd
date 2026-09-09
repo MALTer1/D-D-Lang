@@ -8,10 +8,11 @@ ability last = pop(scores)
 ability has_twenty = contains(scores, 20)
 ability first_twenty = index(scores, 20)
 
+ability values = [1, 2, 3]
 quest double(x):
     reward x * 2
 
-ability doubled = map(scores, double)
+ability doubled = map(values, double)
 
 quest is_big(x):
     reward x > 25
