@@ -1,8 +1,7 @@
 import sys
 from lexer import tokenize
 from parser import parse
-from interpreter import DMError
-from v5_runtime import V5Interpreter, expand_v5_syntax
+from interpreter import Interpreter, DMError
 
 
 def main():
@@ -15,10 +14,9 @@ def main():
         source = f.read()
 
     try:
-        source = expand_v5_syntax(source)
         tokens = tokenize(source)
         ast = parse(tokens)
-        V5Interpreter().run(ast)
+        Interpreter().run(ast)
     except (SyntaxError, DMError) as e:
         print(f"DM: {e}")
 
