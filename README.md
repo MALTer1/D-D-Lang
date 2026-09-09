@@ -86,3 +86,16 @@ See `examples/pig_dice.dnd` for a full game using all of this together.
   - Only lines that **haven't executed yet** can be moved (the past can't un-happen) — moving an already-run line raises a DM error.
 - **v1 scoping note:** `sway` currently only reorders statements at the top level of the block it's called from (the "major" number) — it doesn't yet reach into nested sub-blocks (the "minor" part of an address). This is a deliberate first pass to get a correct, working reordering system rather than a fragile complete one; extending it to nested addressing is a natural next step.
 - `sway` (as CHA flat-multiplication) is retired — that concept no longer exists.
+
+## v5 — lists, list built-ins, adventure iteration, and encounters
+- Lists auto-grow when assigning past the current end; missing positions are filled with `none`.
+- `append(list, value)` and `push(list, value)` add to the end and return the updated list.
+- `pop(list)` removes and returns the last item; `pop(list, index)` removes and returns a specific item.
+- `map(list, operation)` applies an operation to each item and returns a new list.
+- `filter(list, operation)` keeps items for which the operation succeeds/returns true.
+- `contains(list, value)` checks whether a list contains a value.
+- `index(list, value)` returns the first matching index, or `-1` when not found.
+- `adventure i in total:` iterates `i` through the requested total instead of requiring a fixed `adventure(n)` expression.
+- `encounter Name(...):` is an encounter-named quest definition; `fight Name(...)` invokes it for the whole encounter, alongside `quest`/`embark`.
+- Encounter naming also provides an addressable scope for reaching values and nested work inside a named encounter; the detailed major.minor addressing/debug/sorting rules are handled in the encounter addressing pass.
+- The built-in documentation for lists and these operations belongs in the IDE hover/help surface as well as this README.
