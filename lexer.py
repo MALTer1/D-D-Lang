@@ -43,11 +43,9 @@ def strip_comments(line):
         start = line.find("--")
         end = line.find("--", start + 2)
         if end == -1:
-            # comment runs to end of line
             line = line[:start]
             break
-        else:
-            line = line[:start] + line[end + 2:]
+        line = line[:start] + line[end + 2:]
     return line
 
 
@@ -59,12 +57,9 @@ def tokenize(source):
     minor = None
 
     for line_num, raw_line in enumerate(lines, start=1):
-        # Surface syntax that maps directly onto the existing grammar.
-        # Keep the original physical line number so diagnostics still point at
-        # the user's source line.
         adventure_match = re.match(
-            r"^(?P<indent>[ \\t]*)adventure\\s+(?P<var>[A-Za-z_][A-Za-z0-9_]*)"
-            r"\\s+in\\s+(?P<total>.+):\\s*$",
+            r"^(?P<indent>[ \t]*)adventure\s+(?P<var>[A-Za-z_][A-Za-z0-9_]*)"
+            r"\s+in\s+(?P<total>.+):\s*$",
             raw_line,
         )
         if adventure_match:
@@ -75,9 +70,8 @@ def tokenize(source):
 
         line = strip_comments(raw_line)
         if line.strip() == "":
-            continue  # blank/comment-only lines don't affect indentation
+            continue
 
-        # measure indentation (count leading spaces; treat tabs as 4 spaces)
         stripped = line.lstrip(" \t")
         indent = len(line) - len(stripped)
 
@@ -96,20 +90,17 @@ def tokenize(source):
             indent_stack.pop()
             tokens.append(Token("DEDENT", indent, line_num, address))
 
-        # tokenize the rest of the line
         pos = 0
         while pos < len(stripped):
             match = MASTER_PATTERN.match(stripped, pos)
             if not match:
-                raise SyntaxError(
-                    f"The DM doesn't understand '{stripped[pos]}' at line {address}."
-                )
+                raise SyntaxError(f"The DM doesn't understand '{stripped[pos]}' at line {address}.")
             kind = match.lastgroup
             value = match.group()
             pos = match.end()
             if kind == "SKIP":
                 continue
-            elif kind == "NUMBER":
+            if kind == "NUMBER":
                 value = float(value) if "." in value else int(value)
                 tokens.append(Token("NUMBER", value, line_num, address))
             elif kind == "STRING":
@@ -120,10 +111,8 @@ def tokenize(source):
                 if value == "_":
                     tokens.append(Token("_", "_", line_num, address))
                 elif value == "encounter":
-                    # Alias the new encounter definition to the existing quest grammar.
                     tokens.append(Token("quest", value, line_num, address))
                 elif value == "fight":
-                    # Alias the new encounter invocation to embark.
                     tokens.append(Token("embark", value, line_num, address))
                 elif value in KEYWORDS:
                     tokens.append(Token(value, value, line_num, address))
