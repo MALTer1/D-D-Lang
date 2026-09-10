@@ -25,7 +25,7 @@
 ## Files
 - `lexer.py` — turns source text into tokens
 - `parser.py` — turns tokens into an AST
-- `interpreter.py` — walks the AST and actually runs it
+- `interpreter.py` — walks the AST and actually runs the program
 - `run.py` — entry point: `python run.py yourfile.dnd`
 - `examples/` — sample programs
 
@@ -54,9 +54,9 @@ If you ever change the code (`ide.py`, `interpreter.py`, etc.), just re-run `bui
   - `x.sway.mod(n)` / `.number(n)` — CHA, flat multiplication
   - `x.endure.mod(n, times)` / `.number(n, times)` — CON, repeated % reduction. Plain form: `endure(n, times, rate)`
   - `x.perceive.mod(list)` / `.number(list)` — WIS, average + stat. Plain form: `perceive(list)`
-  - `x.solve.mod COMPARATOR(difficulty)` — INT, dice check. Comparator symbols: `/` greater, `_` equal, `\` less, combinable (`/_` = default, greater-or-equal; `\_` = less-or-equal). Example: `x.solve.mod \_(10)`
+  - `x.solve.mod COMPARATOR(difficulty)` — INT, dice check. Comparator symbols: `/` greater, `_` equal, `\\` less, combinable (`/_` = default, greater-or-equal; `\\_` = less-or-equal). Example: `x.solve.mod \\_(10)`
 - `initiative` (DEX, code-line reordering) is still NOT implemented — it's the most complex mechanic and deserves its own dedicated pass.
-- The IDE now shows a hover tooltip over any keyword/built-in with a description of what it does and an example.
+- The IDE now shows a hover tooltip over any keyword/built-in with a description and an example.
 
 ## v3 — while / for-party / submit-consider / strings / renamed reward
 - `reword` was renamed to **`reward`**.
@@ -91,11 +91,26 @@ See `examples/pig_dice.dnd` for a full game using all of this together.
 - Lists auto-grow when assigning past the current end; missing positions are filled with `none`.
 - `append(list, value)` and `push(list, value)` add to the end and return the updated list.
 - `pop(list)` removes and returns the last item; `pop(list, index)` removes and returns a specific item.
-- `map(list, operation)` applies an operation to each item and returns a new list.
-- `filter(list, operation)` keeps items for which the operation succeeds/returns true.
+- `map(list, operation)` applies a quest to each item and returns a new list.
+- `filter(list, operation)` keeps items for which a quest succeeds/returns honor.
 - `contains(list, value)` checks whether a list contains a value.
 - `index(list, value)` returns the first matching index, or `-1` when not found.
 - `adventure i in total:` iterates `i` through the requested total instead of requiring a fixed `adventure(n)` expression.
 - `encounter Name(...):` is an encounter-named quest definition; `fight Name(...)` invokes it for the whole encounter, alongside `quest`/`embark`.
 - Encounter naming also provides an addressable scope for reaching values and nested work inside a named encounter; the detailed major.minor addressing/debug/sorting rules are handled in the encounter addressing pass.
 - The built-in documentation for lists and these operations belongs in the IDE hover/help surface as well as this README.
+
+## v6 — pouches, Vaults, control flow, types, sequences, functions, and Scroll tools
+- `pouch name = {key: value, ...}` declares a key-value collection. Pouches use bracket lookup such as `hero["hp"]`, can be nested, and can be changed with indexed assignment.
+- `none` is now a real language value with the type name `NoneType` (`type(none)` returns `NoneType`).
+- `pass` is a no-op statement for empty/placeholder branches.
+- `raise expression` deliberately raises a DM error so it can be handled by the existing `submit` / `consider` system.
+- `finally:` can follow `submit`/`consider` and always runs after that protected section finishes, whether it succeeds or an error is handled.
+- `vault name = "path"` represents a file as a language value. `read`, `write`, `append`, `close`/`seal`, `exists`, and `remove` provide basic file handling.
+- Type utilities include `type`, `bool`, `num`, `str`, `list`, and `pouch`.
+- Sequence utilities include `sum`, `sorted`, `reversed`, `reverse`, `any`, `all`, `zip`, and `enumerate`. `party()` remains D&D Lang's range/iteration primitive.
+- Functional utilities include `map`, `filter`, and `reduce`, using named quests as operations.
+- Scrolls gain `.replace(x, y)` in addition to the existing search and text methods.
+- Miscellaneous/runtime helpers include `abs`, `round`, `forget`, and `memory` (a small interpreter-side memory estimate for debugging).
+- The IDE highlighter now uses a stateful scanner: once it sees `"`, it treats everything through the matching closing quote as a Scroll; once it sees `--` outside a Scroll, it treats everything through the next `--` or end-of-line as a comment. This prevents numbers, keywords, and other syntax from being recolored inside protected text/comments.
+- The v6 implementation intentionally keeps D&D Lang's existing vocabulary instead of copying Python directly: `party()` remains the range concept, `submit/consider` remain the error-handling syntax, Scrolls remain text, and Vaults represent external file storage.
