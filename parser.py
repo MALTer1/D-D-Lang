@@ -1,308 +1,194 @@
-"""
-Parser for the D&D-themed language.
-Turns the token list from lexer.py into an AST (nested dicts), which
-interpreter.py then walks and executes.
-"""
-
 class Parser:
-    def __init__(self, tokens):
-        self.tokens = tokens
-        self.pos = 0
-
-    def peek(self): return self.tokens[self.pos]
-    def advance(self):
-        tok = self.tokens[self.pos]; self.pos += 1; return tok
-    def check(self, type_): return self.peek().type == type_
-
-    def expect(self, type_):
-        if not self.check(type_):
-            tok = self.peek()
-            address = getattr(tok, "address", None)
-            location = f"line {tok.line} (address {address})" if address not in (None, "") else f"line {tok.line}"
-            raise SyntaxError(f"The DM expected {type_} but found {tok.type} ('{tok.value}') at {location}.")
-        return self.advance()
-
-    def skip_newlines(self):
-        while self.check("NEWLINE"): self.advance()
-
-    def parse_program(self):
-        statements = []; self.skip_newlines()
-        while not self.check("EOF"):
-            statements.append(self.parse_statement()); self.skip_newlines()
-        return {"type": "Program", "body": statements}
-
-    def parse_block(self):
-        self.expect(":"); self.expect("NEWLINE"); self.skip_newlines(); self.expect("INDENT")
-        statements = []; self.skip_newlines()
-        while not self.check("DEDENT") and not self.check("EOF"):
-            statements.append(self.parse_statement()); self.skip_newlines()
-        self.expect("DEDENT"); return statements
-
-    def parse_statement(self):
-        tok = self.peek()
-        if tok.type == "ability": return self.parse_ability()
-        if tok.type == "narrate": return self.parse_narrate()
-        if tok.type == "attempt": return self.parse_attempt()
-        if tok.type == "adventure": return self.parse_adventure()
-        if tok.type == "quest": return self.parse_quest()
-        if tok.type == "homebrew": return self.parse_homebrew()
-        if tok.type == "summon": return self.parse_summon()
-        if tok.type == "embark":
-            node = self.parse_embark_expr(); self.expect("NEWLINE"); return {"type": "ExprStatement", "expr": node}
-        if tok.type == "reward": return self.parse_reward()
-        if tok.type == "init": return self.parse_init()
-        if tok.type == "quit": self.advance(); self.expect("NEWLINE"); return {"type": "Quit"}
-        if tok.type == "continue": self.advance(); self.expect("NEWLINE"); return {"type": "Continue"}
-        if tok.type == "while": return self.parse_while()
-        if tok.type == "for": return self.parse_for()
-        if tok.type == "submit": return self.parse_submit()
-        if tok.type == "ID" and tok.value == "STATS" and self.tokens[self.pos + 1].type == ":": return self.parse_global_stats()
-        if tok.type == "ID": return self.parse_assignment_or_expr()
-        raise SyntaxError(f"The DM doesn't know how to handle '{tok.value}' at line {tok.line} (address {getattr(tok, 'address', None)}).")
-
-    def parse_ability(self):
-        self.expect("ability"); name = self.expect("ID").value; self.expect("="); value = self.parse_expr(); self.expect("NEWLINE")
-        return {"type": "AbilityDecl", "name": name, "value": value}
-
-    def parse_assignment_or_expr(self):
-        start = self.pos; target = self.parse_postfix_target()
-        if self.check("="):
-            self.advance(); value = self.parse_expr(); self.expect("NEWLINE"); return {"type": "Assignment", "target": target, "value": value}
-        if self.check("+="):
-            self.advance(); rhs = self.parse_expr(); self.expect("NEWLINE")
-            return {"type": "Assignment", "target": target, "value": {"type": "BinaryOp", "op": "+", "left": target, "right": rhs}}
-        self.pos = start; expr = self.parse_expr(); self.expect("NEWLINE"); return {"type": "ExprStatement", "expr": expr}
-
-    def _index_field(self, index):
-        if index.get("type") == "Identifier": return f"member_{index['name']}"
-        if index.get("type") == "NumberLiteral": return f"member_{index['value']}"
-        raise SyntaxError("The DM currently needs a number or an ability name inside list brackets.")
-
-    def parse_postfix_target(self):
-        name = self.expect("ID").value; node = {"type": "Identifier", "name": name}
-        while True:
-            if self.check("."):
-                self.advance(); field = self.expect("ID").value; node = {"type": "FieldAccess", "obj": node, "field": field}
-            elif self.check("["):
-                self.advance(); index = self.parse_expr(); self.expect("]")
-                node = {"type": "FieldAccess", "obj": node, "field": self._index_field(index)}
-            else:
-                break
-        return node
-
-    def parse_narrate(self):
-        self.expect("narrate")
-        if self.check("("):
-            self.advance(); value = self.parse_expr(); self.expect(")")
-        else: value = self.parse_expr()
-        self.expect("NEWLINE"); return {"type": "Narrate", "value": value}
-
-    def parse_reward(self):
-        self.expect("reward"); value = self.parse_expr(); self.expect("NEWLINE"); return {"type": "Reword", "value": value}
-
-    def parse_init(self):
-        self.expect("init"); names = [self.expect("ID").value]
-        while self.check(","):
-            self.advance(); names.append(self.expect("ID").value)
-        self.expect("NEWLINE"); return {"type": "Init", "names": names}
-
-    def parse_attempt(self):
-        self.expect("attempt"); self.expect("("); condition = self.parse_expr(); self.expect(")")
-        body = self.parse_block(); clauses = [{"condition": condition, "body": body}]; fail_body = None
-        while self.check("or_attempt"):
-            self.advance(); self.expect("("); cond = self.parse_expr(); self.expect(")"); clauses.append({"condition": cond, "body": self.parse_block()})
-        if self.check("fail"):
-            self.advance(); fail_body = self.parse_block()
-        return {"type": "Attempt", "clauses": clauses, "fail_body": fail_body}
-
-    def parse_adventure(self):
-        self.expect("adventure")
-        if self.check("("):
-            self.advance(); count = self.parse_expr(); self.expect(")")
-            return {"type": "Adventure", "count": count, "body": self.parse_block()}
-        var_name = self.expect("ID").value
-        self.expect("in")
-        items = self.parse_expr()
-        return {"type": "ForParty", "var": var_name, "args": [items], "body": self.parse_block()}
-
-    def parse_quest(self):
-        self.expect("quest"); name = self.expect("ID").value; self.expect("("); params = []
-        if not self.check(")"):
-            params.append(self.expect("ID").value)
-            while self.check(","):
-                self.advance(); params.append(self.expect("ID").value)
-        self.expect(")"); return {"type": "QuestDef", "name": name, "params": params, "body": self.parse_block()}
-
-    def parse_embark_expr(self):
-        self.expect("embark"); name = self.expect("ID").value; self.expect("("); args = []
-        if not self.check(")"):
-            args.append(self.parse_expr())
-            while self.check(","):
-                self.advance(); args.append(self.parse_expr())
-        self.expect(")"); return {"type": "Embark", "name": name, "args": args}
-
-    def parse_homebrew(self):
-        self.expect("homebrew"); kind = self.expect("ID").value; name = self.expect("ID").value
-        self.expect(":"); self.expect("NEWLINE"); self.expect("INDENT"); fields = {}; stats = {}; extra_stats = {}; self.skip_newlines()
-        while not self.check("DEDENT"):
-            if self.check("ID") and self.peek().value == "STATS": self.advance(); stats, extra_stats = self.parse_stats_block()
-            else:
-                fname = self.expect("ID").value; self.expect("="); fexpr = self.parse_expr(); self.expect("NEWLINE"); fields[fname] = fexpr
-            self.skip_newlines()
-        self.expect("DEDENT"); return {"type": "HomebrewDef", "kind": kind, "name": name, "fields": fields, "stats": stats, "extra_stats": extra_stats}
-
-    def parse_stats_block(self):
-        self.expect(":"); self.expect("NEWLINE"); self.expect("INDENT"); stats = {}; extra_stats = {}; self.skip_newlines()
-        while not self.check("DEDENT"):
-            if self.check("extra"):
-                self.advance(); ename = self.expect("ID").value; self.expect("="); eexpr = self.parse_expr(); self.expect("NEWLINE"); extra_stats[ename] = eexpr
-            else:
-                sname = self.expect("ID").value; self.expect("="); sexpr = self.parse_expr(); self.expect("NEWLINE"); stats[sname] = sexpr
-            self.skip_newlines()
-        self.expect("DEDENT"); return stats, extra_stats
-
-    def parse_global_stats(self):
-        self.advance(); stats, extra_stats = self.parse_stats_block(); return {"type": "GlobalStats", "stats": stats, "extra_stats": extra_stats}
-
-    def parse_summon(self):
-        self.expect("summon"); var_name = self.expect("ID").value; self.expect("="); template_name = self.expect("ID").value; self.expect("("); self.expect(")"); self.expect("NEWLINE")
-        return {"type": "SummonDecl", "var_name": var_name, "template": template_name}
-
-    def parse_while(self):
-        self.expect("while"); condition = self.parse_expr(); return {"type": "While", "condition": condition, "body": self.parse_block()}
-
-    def parse_for(self):
-        self.expect("for"); var_name = self.expect("ID").value; self.expect("in"); self.expect("party"); self.expect("(")
-        args = [self.parse_expr()]
-        while self.check(","):
-            self.advance(); args.append(self.parse_expr())
-        self.expect(")"); return {"type": "ForParty", "var": var_name, "args": args, "body": self.parse_block()}
-
-    def parse_submit(self):
-        self.expect("submit"); body = self.parse_block(); considers = []
-        while self.check("consider"):
-            self.advance(); error_name = None
-            if self.check("issue"):
-                self.advance(); error_name = self.expect("ID").value
-            considers.append({"error_name": error_name, "body": self.parse_block()})
-        return {"type": "Submit", "body": body, "considers": considers}
-
-    def parse_expr(self): return self.parse_comparison()
-
-    def parse_comparison(self):
-        left = self.parse_additive()
-        while self.peek().type in ("==", "!=", ">", "<", ">=", "<="):
-            op = self.advance().type; right = self.parse_additive(); left = {"type": "BinaryOp", "op": op, "left": left, "right": right}
-        return left
-
-    def parse_additive(self):
-        left = self.parse_multiplicative()
-        while self.peek().type in ("+", "-"):
-            op = self.advance().type; right = self.parse_multiplicative(); left = {"type": "BinaryOp", "op": op, "left": left, "right": right}
-        return left
-
-    def parse_multiplicative(self):
-        left = self.parse_unary()
-        while self.peek().type in ("*", "/", "%"):
-            op = self.advance().type; right = self.parse_unary(); left = {"type": "BinaryOp", "op": op, "left": left, "right": right}
-        return left
-
-    def parse_unary(self):
-        if self.peek().type == "-": self.advance(); return {"type": "UnaryOp", "op": "-", "operand": self.parse_unary()}
-        if self.peek().type == "+": self.advance(); return self.parse_unary()
-        return self.parse_postfix()
-
-    def parse_force_call(self, instance):
-        self.expect("."); mode = self.expect("ID").value; self.expect("("); symbol_tok = self.advance()
-        if symbol_tok.type not in ("+", "-", "*", "/", "%"):
-            raise SyntaxError(f"The DM expected a math symbol (+ - * / %) but found '{symbol_tok.value}' at line {symbol_tok.line} (address {getattr(symbol_tok, 'address', None)}).")
-        self.expect(","); value_expr = self.parse_expr(); self.expect(")")
-        return {"type": "ForceExpr", "instance": instance, "mode": mode, "symbol": symbol_tok.type, "value": value_expr}
-
-    def parse_sway_call(self, instance):
-        self.expect("("); address_expr = self.parse_expr(); self.expect(","); shift_node = self.parse_shift_spec(); self.expect(")")
-        return {"type": "SwayExpr", "instance": instance, "address": address_expr, "shift": shift_node}
-
-    def parse_shift_spec(self):
-        if self.peek().type in ("+", "-"):
-            sign = self.advance().type; num_tok = self.expect("NUMBER"); value = num_tok.value if sign == "+" else -num_tok.value; return {"type": "ShiftLiteral", "value": value}
-        if self.check("NUMBER"): return {"type": "ShiftLiteral", "value": self.advance().value}
-        name = self.expect("ID").value
-        if name in ("mod", "number") and not self.check("."): return {"type": "ShiftStatRef", "stat": None, "mode": name}
-        if self.check("."):
-            self.advance(); mode = self.expect("ID").value; return {"type": "ShiftStatRef", "stat": name, "mode": mode}
-        raise SyntaxError(f"The DM doesn't understand the shift '{name}' at line {self.peek().line} (address {getattr(self.peek(), 'address', None)}).")
-
-    def parse_postfix(self):
-        node = self.parse_primary()
-        while True:
-            if self.check("."):
-                self.advance(); field = self.expect("ID").value
-                if field == "solve" and self.check("."):
-                    self.advance(); mode = self.expect("ID").value; comparator = ""
-                    while self.peek().type in ("/", "_", "\\"): comparator += self.advance().type
-                    if comparator == "": comparator = "/_"
-                    self.expect("("); difficulty = self.parse_expr(); self.expect(")")
-                    node = {"type": "SolveExpr", "instance": node, "mode": mode, "comparator": comparator, "difficulty": difficulty}; continue
-                if field == "force" and self.check("."): node = self.parse_force_call(instance=node); continue
-                if field == "sway" and self.check("("): node = self.parse_sway_call(instance=node); continue
-                node = {"type": "FieldAccess", "obj": node, "field": field}
-            elif self.check("["):
-                self.advance(); index = self.parse_expr(); self.expect("]")
-                node = {"type": "FieldAccess", "obj": node, "field": self._index_field(index)}
-            elif self.check("("):
-                self.advance(); args = []
-                if not self.check(")"):
-                    args.append(self.parse_expr())
-                    while self.check(","):
-                        self.advance(); args.append(self.parse_expr())
-                self.expect(")"); node = {"type": "CallExpr", "callee": node, "args": args}
-            else: break
-        return node
-
-    def parse_primary(self):
-        tok = self.peek()
-        if tok.type == "NUMBER": self.advance(); return {"type": "NumberLiteral", "value": tok.value}
-        if tok.type == "STRING": self.advance(); return {"type": "StringLiteral", "value": tok.value}
-        if tok.type == "honor": self.advance(); return {"type": "BoolLiteral", "value": True}
-        if tok.type == "lie": self.advance(); return {"type": "BoolLiteral", "value": False}
-        if tok.type == "DICE": self.advance(); return {"type": "DiceLiteral", "max": tok.value}
-        if tok.type == "player": self.advance(); self.expect("("); prompt = self.parse_expr(); self.expect(")"); return {"type": "PlayerInput", "prompt": prompt}
-        if tok.type == "embark": return self.parse_embark_expr()
-        if tok.type == "[":
-            self.advance(); elements = []
-            if not self.check("]"):
-                elements.append(self.parse_expr())
-                while self.check(","):
-                    self.advance(); elements.append(self.parse_expr())
-            self.expect("]"); return {"type": "ListLiteral", "elements": elements}
-        if tok.type == "(":
-            self.advance(); expr = self.parse_expr(); self.expect(")"); return expr
-        if tok.type == "ID":
-            self.advance(); name = tok.value
-            if name == "force" and self.check("."): return self.parse_force_call(instance=None)
-            if name == "sway" and self.check("("): return self.parse_sway_call(instance=None)
-            if self.check("("):
-                self.advance(); args = []
-                if not self.check(")"):
-                    args.append(self.parse_expr())
-                    while self.check(","):
-                        self.advance(); args.append(self.parse_expr())
-                self.expect(")"); return {"type": "Call", "name": name, "args": args}
-            return {"type": "Identifier", "name": name}
-        raise SyntaxError(f"The DM doesn't understand '{tok.value}' at line {tok.line} (address {getattr(tok, 'address', None)}).")
-
-
-def _attach_statement_locations(parser, statements):
-    for stmt in statements:
-        if "address" not in stmt: stmt["address"] = None
-    return statements
-
-_original_parse_statement = Parser.parse_statement
-
-def _parse_statement_with_location(self):
-    tok = self.peek(); stmt = _original_parse_statement(self); stmt["line"] = tok.line; stmt["address"] = getattr(tok, "address", None); return stmt
-
-Parser.parse_statement = _parse_statement_with_location
+ def __init__(self,tokens): self.tokens=tokens; self.pos=0
+ def peek(self): return self.tokens[self.pos]
+ def advance(self): t=self.tokens[self.pos]; self.pos+=1; return t
+ def check(self,t): return self.peek().type==t
+ def expect(self,t):
+  if not self.check(t):
+   x=self.peek(); a=getattr(x,'address',None); loc=f'line {x.line} (address {a})' if a not in (None,'') else f'line {x.line}'; raise SyntaxError(f'The DM expected {t} but found {x.type} (\'{x.value}\') at {loc}.')
+  return self.advance()
+ def skip_newlines(self):
+  while self.check('NEWLINE'): self.advance()
+ def parse_program(self):
+  b=[]; self.skip_newlines()
+  while not self.check('EOF'): b.append(self.parse_statement()); self.skip_newlines()
+  return {'type':'Program','body':b}
+ def parse_block(self):
+  self.expect(':'); self.expect('NEWLINE'); self.skip_newlines(); self.expect('INDENT'); b=[]
+  while not self.check('DEDENT') and not self.check('EOF'): b.append(self.parse_statement()); self.skip_newlines()
+  self.expect('DEDENT'); return b
+ def parse_statement(self):
+  t=self.peek().type
+  if t in ('ability','pouch'): return self.parse_var_decl(t)
+  if t=='vault': return self.parse_vault()
+  if t=='narrate': return self.parse_narrate()
+  if t=='attempt': return self.parse_attempt()
+  if t=='adventure': return self.parse_adventure()
+  if t=='quest': return self.parse_quest()
+  if t=='homebrew': return self.parse_homebrew()
+  if t=='summon': return self.parse_summon()
+  if t=='embark': n=self.parse_embark_expr(); self.expect('NEWLINE'); return {'type':'ExprStatement','expr':n}
+  if t=='reward': self.expect('reward'); v=self.parse_expr(); self.expect('NEWLINE'); return {'type':'Reword','value':v}
+  if t=='init': self.advance(); ns=[self.expect('ID').value]
+  elif t=='quit': self.advance(); self.expect('NEWLINE'); return {'type':'Quit'}
+  elif t=='continue': self.advance(); self.expect('NEWLINE'); return {'type':'Continue'}
+  elif t=='pass': self.advance(); self.expect('NEWLINE'); return {'type':'Pass'}
+  elif t=='raise': self.advance(); v=self.parse_expr(); self.expect('NEWLINE'); return {'type':'Raise','value':v}
+  elif t=='while': self.expect('while'); c=self.parse_expr(); return {'type':'While','condition':c,'body':self.parse_block()}
+  elif t=='for': return self.parse_for()
+  elif t=='submit': return self.parse_submit()
+  elif t=='ID' and self.peek().value=='STATS' and self.tokens[self.pos+1].type==':': return self.parse_global_stats()
+  elif t=='ID': return self.parse_assignment_or_expr()
+  else: raise SyntaxError(f"The DM doesn't know how to handle '{self.peek().value}' at line {self.peek().line}.")
+  while self.check(','): self.advance(); ns.append(self.expect('ID').value)
+  self.expect('NEWLINE'); return {'type':'Init','names':ns}
+ def parse_var_decl(self,k): self.expect(k); n=self.expect('ID').value; self.expect('='); v=self.parse_expr(); self.expect('NEWLINE'); return {'type':'AbilityDecl' if k=='ability' else 'PouchDecl','name':n,'value':v}
+ def parse_vault(self): self.expect('vault'); n=self.expect('ID').value; self.expect('='); p=self.parse_expr(); self.expect('NEWLINE'); return {'type':'VaultDecl','name':n,'path':p}
+ def parse_assignment_or_expr(self):
+  s=self.pos; target=self.parse_target()
+  if self.check('='): self.advance(); v=self.parse_expr(); self.expect('NEWLINE'); return {'type':'Assignment','target':target,'value':v}
+  if self.check('+='): self.advance(); r=self.parse_expr(); self.expect('NEWLINE'); return {'type':'Assignment','target':target,'value':{'type':'BinaryOp','op':'+','left':target,'right':r}}
+  self.pos=s; e=self.parse_expr(); self.expect('NEWLINE'); return {'type':'ExprStatement','expr':e}
+ def parse_target(self):
+  n={'type':'Identifier','name':self.expect('ID').value}
+  while self.check('.') or self.check('['):
+   if self.check('.'): self.advance(); n={'type':'FieldAccess','obj':n,'field':self.expect('ID').value}
+   else: self.advance(); i=self.parse_expr(); self.expect(']'); n={'type':'IndexAccess','obj':n,'index':i}
+  return n
+ def parse_narrate(self):
+  self.expect('narrate'); v=self.parse_expr() if not self.check('(') else (self.advance() or self.parse_expr());
+  if isinstance(v,type(None)): pass
+  if self.tokens[self.pos-1].type!='(': self.expect('NEWLINE'); return {'type':'Narrate','value':v}
+  self.expect(')'); self.expect('NEWLINE'); return {'type':'Narrate','value':v}
+ def parse_attempt(self):
+  self.expect('attempt'); self.expect('('); c=self.parse_expr(); self.expect(')'); clauses=[{'condition':c,'body':self.parse_block()}]; f=None
+  while self.check('or_attempt'): self.advance(); self.expect('('); c=self.parse_expr(); self.expect(')'); clauses.append({'condition':c,'body':self.parse_block()})
+  if self.check('fail'): self.advance(); f=self.parse_block()
+  return {'type':'Attempt','clauses':clauses,'fail_body':f}
+ def parse_adventure(self):
+  self.expect('adventure')
+  if self.check('('): self.advance(); c=self.parse_expr(); self.expect(')'); return {'type':'Adventure','count':c,'body':self.parse_block()}
+  n=self.expect('ID').value; self.expect('in'); x=self.parse_expr(); return {'type':'ForParty','var':n,'args':[x],'body':self.parse_block()}
+ def parse_quest(self):
+  self.expect('quest'); n=self.expect('ID').value; self.expect('('); p=[]
+  if not self.check(')'):
+   p.append(self.expect('ID').value)
+   while self.check(','): self.advance(); p.append(self.expect('ID').value)
+  self.expect(')'); return {'type':'QuestDef','name':n,'params':p,'body':self.parse_block()}
+ def parse_embark_expr(self):
+  self.expect('embark'); n=self.expect('ID').value; self.expect('('); a=[]
+  if not self.check(')'):
+   a.append(self.parse_expr())
+   while self.check(','): self.advance(); a.append(self.parse_expr())
+  self.expect(')'); return {'type':'Embark','name':n,'args':a}
+ def parse_homebrew(self):
+  self.expect('homebrew'); k=self.expect('ID').value; n=self.expect('ID').value; self.expect(':'); self.expect('NEWLINE'); self.expect('INDENT'); f={}; s={}; e={}
+  while not self.check('DEDENT'):
+   if self.check('ID') and self.peek().value=='STATS': self.advance(); s,e=self.parse_stats_block()
+   else: q=self.expect('ID').value; self.expect('='); f[q]=self.parse_expr(); self.expect('NEWLINE')
+   self.skip_newlines()
+  self.expect('DEDENT'); return {'type':'HomebrewDef','kind':k,'name':n,'fields':f,'stats':s,'extra_stats':e}
+ def parse_stats_block(self):
+  self.expect(':'); self.expect('NEWLINE'); self.expect('INDENT'); s={}; e={}
+  while not self.check('DEDENT'):
+   if self.check('extra'): self.advance(); n=self.expect('ID').value; self.expect('='); e[n]=self.parse_expr(); self.expect('NEWLINE')
+   else: n=self.expect('ID').value; self.expect('='); s[n]=self.parse_expr(); self.expect('NEWLINE')
+   self.skip_newlines()
+  self.expect('DEDENT'); return s,e
+ def parse_global_stats(self): self.advance(); s,e=self.parse_stats_block(); return {'type':'GlobalStats','stats':s,'extra_stats':e}
+ def parse_summon(self): self.expect('summon'); v=self.expect('ID').value; self.expect('='); n=self.expect('ID').value; self.expect('('); self.expect(')'); self.expect('NEWLINE'); return {'type':'SummonDecl','var_name':v,'template':n}
+ def parse_for(self):
+  self.expect('for'); v=self.expect('ID').value; self.expect('in'); self.expect('party'); self.expect('('); a=[self.parse_expr()]
+  while self.check(','): self.advance(); a.append(self.parse_expr())
+  self.expect(')'); return {'type':'ForParty','var':v,'args':a,'body':self.parse_block()}
+ def parse_submit(self):
+  self.expect('submit'); b=self.parse_block(); c=[]
+  while self.check('consider'):
+   self.advance(); n=None
+   if self.check('issue'): self.advance(); n=self.expect('ID').value
+   c.append({'error_name':n,'body':self.parse_block()})
+  f=None
+  if self.check('finally'): self.advance(); f=self.parse_block()
+  return {'type':'Submit','body':b,'considers':c,'finally_body':f}
+ def parse_expr(self): return self.parse_comparison()
+ def parse_comparison(self):
+  n=self.parse_additive()
+  while self.peek().type in ('==','!=','>','<','>=','<='): o=self.advance().type; r=self.parse_additive(); n={'type':'BinaryOp','op':o,'left':n,'right':r}
+  return n
+ def parse_additive(self):
+  n=self.parse_multiplicative()
+  while self.peek().type in ('+','-'): o=self.advance().type; r=self.parse_multiplicative(); n={'type':'BinaryOp','op':o,'left':n,'right':r}
+  return n
+ def parse_multiplicative(self):
+  n=self.parse_unary()
+  while self.peek().type in ('*','/','%'): o=self.advance().type; r=self.parse_unary(); n={'type':'BinaryOp','op':o,'left':n,'right':r}
+  return n
+ def parse_unary(self):
+  if self.check('-'): self.advance(); return {'type':'UnaryOp','op':'-','operand':self.parse_unary()}
+  if self.check('+'): self.advance(); return self.parse_unary()
+  return self.parse_postfix()
+ def parse_postfix(self):
+  n=self.parse_primary()
+  while 1:
+   if self.check('.'):
+    self.advance(); f=self.expect('ID').value
+    if f=='solve' and self.check('.'):
+     self.advance(); m=self.expect('ID').value; c=''
+     while self.peek().type in ('/','_','\\'): c+=self.advance().type
+     if not c:c='/_'
+     self.expect('('); d=self.parse_expr(); self.expect(')'); n={'type':'SolveExpr','instance':n,'mode':m,'comparator':c,'difficulty':d}
+    elif f=='force' and self.check('.'): n=self.parse_force_call(n)
+    elif f=='sway' and self.check('('): n=self.parse_sway_call(n)
+    else: n={'type':'FieldAccess','obj':n,'field':f}
+   elif self.check('['): self.advance(); i=self.parse_expr(); self.expect(']'); n={'type':'IndexAccess','obj':n,'index':i}
+   elif self.check('('): self.advance(); a=[]
+   else: break
+   if self.tokens[self.pos-1].type=='(':
+    if not self.check(')'):
+     a.append(self.parse_expr())
+     while self.check(','): self.advance(); a.append(self.parse_expr())
+    self.expect(')'); n={'type':'CallExpr','callee':n,'args':a}
+  return n
+ def parse_force_call(self,i):
+  self.expect('.'); m=self.expect('ID').value; self.expect('('); s=self.advance();
+  if s.type not in ('+','-','*','/','%'): raise SyntaxError('The DM expected a math symbol.')
+  self.expect(','); v=self.parse_expr(); self.expect(')'); return {'type':'ForceExpr','instance':i,'mode':m,'symbol':s.type,'value':v}
+ def parse_sway_call(self,i): self.expect('('); a=self.parse_expr(); self.expect(','); q=self.parse_shift_spec(); self.expect(')'); return {'type':'SwayExpr','instance':i,'address':a,'shift':q}
+ def parse_shift_spec(self):
+  if self.peek().type in ('+','-'): s=self.advance().type; n=self.expect('NUMBER').value; return {'type':'ShiftLiteral','value':n if s=='+' else -n}
+  if self.check('NUMBER'): return {'type':'ShiftLiteral','value':self.advance().value}
+  n=self.expect('ID').value
+  if n in ('mod','number') and not self.check('.'): return {'type':'ShiftStatRef','stat':None,'mode':n}
+  if self.check('.'): self.advance(); return {'type':'ShiftStatRef','stat':n,'mode':self.expect('ID').value}
+  raise SyntaxError('The DM does not understand that sway shift.')
+ def parse_primary(self):
+  t=self.peek()
+  if t.type=='NUMBER': self.advance(); return {'type':'NumberLiteral','value':t.value}
+  if t.type=='STRING': self.advance(); return {'type':'StringLiteral','value':t.value}
+  if t.type=='honor': self.advance(); return {'type':'BoolLiteral','value':True}
+  if t.type=='lie': self.advance(); return {'type':'BoolLiteral','value':False}
+  if t.type=='none': self.advance(); return {'type':'NoneLiteral'}
+  if t.type=='DICE': self.advance(); return {'type':'DiceLiteral','max':t.value}
+  if t.type=='player': self.advance(); self.expect('('); p=self.parse_expr(); self.expect(')'); return {'type':'PlayerInput','prompt':p}
+  if t.type=='embark': return self.parse_embark_expr()
+  if t.type=='[':
+   self.advance(); a=[]
+   if not self.check(']'):
+    a.append(self.parse_expr())
+    while self.check(','): self.advance(); a.append(self.parse_expr())
+   self.expect(']'); return {'type':'ListLiteral','elements':a}
+  if t.type=='{':
+   self.advance(); a=[]
+   if not self.check('}'):
+    k=self.parse_expr(); self.expect(':'); v=self.parse_expr(); a.append((k,v))
+    while self.check(','):
+     self.advance()
+     if self.check('}'): break
+     k=self.parse_expr(); self.expect(':'); v=self.parse_expr(); a.append((k,v))
+   self.expect('}'); return {'type':'PouchLiteral','pairs':a}
+  if t.type=='(':
+   self.advance(); n=self.parse_expr(); self.expect(')'); return n
+  if t.type=='ID': self.advance(); return {'type':'Identifier','name':t.value}
+  raise SyntaxError(f"The DM doesn't understand '{t.value}' at line {t.line}.")
 
 def parse(tokens): return Parser(tokens).parse_program()
