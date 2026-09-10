@@ -77,6 +77,11 @@ class Parser:
         name = self.expect("ID").value; node = {"type": "Identifier", "name": name}
         while self.check("."):
             self.advance(); field = self.expect("ID").value; node = {"type": "FieldAccess", "obj": node, "field": field}
+        while self.check("["):
+            self.advance()
+            index = self.parse_expr()
+            self.expect("]")
+            node = {"type": "IndexAccess", "obj": node, "index": index}
         return node
 
     def parse_narrate(self):
@@ -204,7 +209,7 @@ class Parser:
     def parse_force_call(self, instance):
         self.expect("."); mode = self.expect("ID").value; self.expect("("); symbol_tok = self.advance()
         if symbol_tok.type not in ("+", "-", "*", "/", "%"):
-            raise SyntaxError(f"The DM expected a math symbol (+ - * / %) but found '{symbol_tok.value}' at line {getattr(symbol_tok, 'address', symbol_tok.line)}.")
+            raise SyntaxError(f"The DM expected a math symbol (+ - * / %) but found '{symbol_tok.value}' at line {symbol_tok.line} (address {getattr(symbol_tok, 'address', None)}).")
         self.expect(","); value_expr = self.parse_expr(); self.expect(")")
         return {"type": "ForceExpr", "instance": instance, "mode": mode, "symbol": symbol_tok.type, "value": value_expr}
 
@@ -220,7 +225,7 @@ class Parser:
         if name in ("mod", "number") and not self.check("."): return {"type": "ShiftStatRef", "stat": None, "mode": name}
         if self.check("."):
             self.advance(); mode = self.expect("ID").value; return {"type": "ShiftStatRef", "stat": name, "mode": mode}
-        raise SyntaxError(f"The DM doesn't understand the shift '{name}' at line {getattr(self.peek(), 'address', self.peek().line)}.")
+        raise SyntaxError(f"The DM doesn't understand the shift '{name}' at line {self.peek().line} (address {getattr(self.peek(), 'address', None)}).")
 
     def parse_postfix(self):
         node = self.parse_primary()
@@ -236,6 +241,11 @@ class Parser:
                 if field == "force" and self.check("."): node = self.parse_force_call(instance=node); continue
                 if field == "sway" and self.check("("): node = self.parse_sway_call(instance=node); continue
                 node = {"type": "FieldAccess", "obj": node, "field": field}
+            elif self.check("["):
+                self.advance()
+                index = self.parse_expr()
+                self.expect("]")
+                node = {"type": "IndexAccess", "obj": node, "index": index}
             elif self.check("("):
                 self.advance(); args = []
                 if not self.check(")"):
@@ -276,7 +286,7 @@ class Parser:
                         self.advance(); args.append(self.parse_expr())
                 self.expect(")"); return {"type": "Call", "name": name, "args": args}
             return {"type": "Identifier", "name": name}
-        raise SyntaxError(f"The DM doesn't understand '{tok.value}' at line {getattr(tok, 'address', tok.line)}.")
+        raise SyntaxError(f"The DM doesn't understand '{tok.value}' at line {tok.line} (address {getattr(tok, 'address', None)}).")
 
 
 def _attach_statement_locations(parser, statements):
@@ -287,11 +297,7 @@ def _attach_statement_locations(parser, statements):
 _original_parse_statement = Parser.parse_statement
 
 def _parse_statement_with_location(self):
-    tok = self.peek()
-    stmt = _original_parse_statement(self)
-    stmt["line"] = tok.line
-    stmt["address"] = getattr(tok, "address", None)
-    return stmt
+    tok = self.peek(); stmt = _original_parse_statement(self); stmt["line"] = tok.line; stmt["address"] = getattr(tok, "address", None); return stmt
 
 Parser.parse_statement = _parse_statement_with_location
 
