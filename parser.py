@@ -43,7 +43,9 @@ class Parser:
   while self.check(','):self.advance();ns.append(self.expect('ID').value)
   self.expect('NEWLINE');return {'type':'Init','names':ns}
  def parse_var_decl(self,k):
-  self.expect(k);n=self.expect('ID').value;self.expect('=');v=self.parse_expr();self.expect('NEWLINE');return {'type':'AbilityDecl' if k=='ability' else 'PouchDecl','name':n,'value':v}
+  self.expect(k);n=self.expect('ID').value;self.expect('=');v=self.parse_expr()
+  if k=='pouch' and v.get('type')!='PouchLiteral':raise SyntaxError("The DM expects a pouch to be written as key-value pairs inside { }.")
+  self.expect('NEWLINE');return {'type':'AbilityDecl' if k=='ability' else 'PouchDecl','name':n,'value':v}
  def parse_vault(self):self.expect('vault');n=self.expect('ID').value;self.expect('=');p=self.parse_expr();self.expect('NEWLINE');return {'type':'VaultDecl','name':n,'path':p}
  def parse_assignment_or_expr(self):
   s=self.pos;t=self.parse_target()
@@ -63,7 +65,8 @@ class Parser:
   self.expect('NEWLINE');return {'type':'Narrate','value':v}
  def parse_attempt(self):
   self.expect('attempt');self.expect('(');c=self.parse_expr();self.expect(')');clauses=[{'condition':c,'body':self.parse_block()}];f=None
-  while self.check('or_attempt'):self.advance();c=self.parse_expr() if self.check('(')==False else (self.advance() or self.parse_expr());self.expect(')');clauses.append({'condition':c,'body':self.parse_block()})
+  while self.check('or_attempt'):
+   self.advance();self.expect('(');c=self.parse_expr();self.expect(')');clauses.append({'condition':c,'body':self.parse_block()})
   if self.check('fail'):self.advance();f=self.parse_block()
   return {'type':'Attempt','clauses':clauses,'fail_body':f}
  def parse_adventure(self):
