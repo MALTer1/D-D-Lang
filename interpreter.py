@@ -1,624 +1,409 @@
-"""
-Interpreter for the D&D-themed language.
-Walks the AST from parser.py and actually executes the program.
-
-Scoping rules implemented:
-- attempt/or_attempt/fail and adventure blocks are normal nested scopes:
-  they can see and modify variables from any enclosing scope.
-- quest bodies are ISOLATED by default. They only see their own
-  parameters, plus anything explicitly pulled in with `init name`.
-  `init` looks up the variable in the scope that was active where
-  `embark` was called from.
-
-homebrew/STATS notes:
-- kind names are fixed: character, item, monster, spell.
-- field names inside a homebrew are free, but must be number/Scroll/
-  honor-lie/list, and must meet a shape requirement (min total counted
-  fields, min distinct types, capped contribution per type).
-- Every homebrew automatically gets a STATS block: STR/DEX/CON/INT/WIS/CHA,
-  defaulting to 10 if not set, plus unlimited custom "extra" stats.
-  Each stat has .number and .mod (auto = floor((number-10)/2), overridable).
-- The 6 default stats have real built-in behavior, called via the instance:
-    instance.force.mod(x)     -- STR: x + STR value
-    instance.sway.mod(x)      -- CHA: x * CHA value
-    instance.endure.mod(x, times)   -- CON: repeated % reduction
-    instance.perceive.mod(x_list)   -- WIS: average of list + WIS value
-    instance.solve.mod COMPARATOR(difficulty)  -- INT: dice check, e.g.
-        instance.solve.mod \\_(10)
-  (.mod or .number picks which of the stat's two values feeds the math)
-  `initiative` (DEX, code reordering) is not implemented yet.
-"""
-
 import math
+import os
 import random
-import re
-
 
 class DMError(Exception):
-    """A runtime error, reported in the DM's voice."""
     def __init__(self, message, line=None):
-        loc = f" (line {line})" if line is not None else ""
+        loc=f" (line {line})" if line is not None else ""
         super().__init__(f"That's not within your ability{loc}: {message}")
-
-
-class QuitSignal(Exception):
-    """Raised by `quit` to break out of the nearest adventure/while/for loop."""
-    pass
-
-
-class ContinueSignal(Exception):
-    """Raised by `continue` to skip to the next iteration of the nearest loop."""
-    pass
-
-
+class QuitSignal(Exception): pass
+class ContinueSignal(Exception): pass
 class RewordSignal(Exception):
-    """Raised by `reward` to return a value from a quest."""
-    def __init__(self, value):
-        self.value = value
+    def __init__(self,value): self.value=value
+class VaultHandle:
+    def __init__(self,path): self.path=os.fspath(path); self.closed=False
+    def check(self):
+        if self.closed: raise DMError("That vault has already been sealed.")
 
+SHAPE_RULES={"character":{"min_total":3,"min_types":2,"max_per_type":2},"item":{"min_total":2,"min_types":2,"max_per_type":1},"monster":{"min_total":2,"min_types":2,"max_per_type":1},"spell":{"min_total":2,"min_types":2,"max_per_type":1}}
+DEFAULT_STAT_NAMES=["STR","DEX","CON","INT","WIS","CHA"]
+STAT_FUNC_TO_STAT={"endure":"CON","perceive":"WIS"}
 
-SHAPE_RULES = {
-    "character": {"min_total": 3, "min_types": 2, "max_per_type": 2},
-    "item":      {"min_total": 2, "min_types": 2, "max_per_type": 1},
-    "monster":   {"min_total": 2, "min_types": 2, "max_per_type": 1},
-    "spell":     {"min_total": 2, "min_types": 2, "max_per_type": 1},
-}
-
-DEFAULT_STAT_NAMES = ["STR", "DEX", "CON", "INT", "WIS", "CHA"]
-STAT_FUNC_TO_STAT = {"endure": "CON", "perceive": "WIS"}
-
-
-class Environment:
-    def __init__(self, parent=None):
-        self.vars = {}
-        self.parent = parent
-
-    def get(self, name):
-        if name in self.vars:
-            return self.vars[name]
-        if self.parent is not None:
-            return self.parent.get(name)
-        raise DMError(f"'{name}' hasn't been declared with 'ability' yet.")
-
-    def set_existing(self, name, value):
-        env = self
-        while env is not None:
-            if name in env.vars:
-                env.vars[name] = value
-                return
-            env = env.parent
-        self.vars[name] = value
-
-    def declare(self, name, value):
-        self.vars[name] = value
-
-
-def to_scroll(value):
-    if value is True:
-        return "honor"
-    if value is False:
-        return "lie"
-    return str(value)
-
-
-def classify_value(value):
-    if isinstance(value, bool):
-        return "honor/lie"
-    if isinstance(value, (int, float)):
-        return "number"
-    if isinstance(value, str):
-        return "Scroll"
-    if isinstance(value, list):
-        return "list"
+def classify_value(v):
+    if v is None:return "NoneType"
+    if isinstance(v,bool):return "honor/lie"
+    if isinstance(v,(int,float)):return "number"
+    if isinstance(v,str):return "Scroll"
+    if isinstance(v,list):return "list"
+    if isinstance(v,dict):return "pouch"
+    if isinstance(v,VaultHandle):return "vault"
     return "unknown"
 
+def to_scroll(v):
+    if v is None:return "none"
+    if v is True:return "honor"
+    if v is False:return "lie"
+    if isinstance(v,VaultHandle):return v.path
+    return str(v)
+
+def value_to_literal_node(v):
+    if v is None:return {"type":"NoneLiteral"}
+    if isinstance(v,bool):return {"type":"BoolLiteral","value":v}
+    if isinstance(v,(int,float)):return {"type":"NumberLiteral","value":v}
+    if isinstance(v,list):return {"type":"ListLiteral","elements":[value_to_literal_node(x) for x in v]}
+    if isinstance(v,dict):return {"type":"PouchLiteral","pairs":[(value_to_literal_node(k),value_to_literal_node(x)) for k,x in v.items()]}
+    return {"type":"StringLiteral","value":to_scroll(v)}
+
+class Environment:
+    def __init__(self,parent=None):self.vars={};self.parent=parent
+    def get(self,name):
+        if name in self.vars:return self.vars[name]
+        if self.parent is not None:return self.parent.get(name)
+        raise DMError(f"'{name}' hasn't been declared with 'ability', 'pouch', or 'vault'.")
+    def set_existing(self,name,value):
+        e=self
+        while e is not None:
+            if name in e.vars:e.vars[name]=value;return
+            e=e.parent
+        self.vars[name]=value
+    def declare(self,name,value):self.vars[name]=value
+    def forget(self,name):
+        e=self
+        while e is not None:
+            if name in e.vars:del e.vars[name];return True
+            e=e.parent
+        return False
 
 class Interpreter:
-    def __init__(self, output_func=print, input_func=input):
-        self.global_env = Environment()
-        self.quests = {}
-        self.homebrews = {}
-        self.output_func = output_func
-        self.input_func = input_func
-        self.caller_stack = []
-        self.global_stats = None
-        self.block_stack = []
-
-    def run(self, program_ast):
-        self.exec_block(program_ast["body"], self.global_env)
-
-    def exec_block(self, statements, env):
-        frame = {"statements": list(statements), "index": 0}
-        self.block_stack.append(frame)
+    def __init__(self,output_func=print,input_func=input):
+        self.global_env=Environment();self.quests={};self.homebrews={};self.output_func=output_func;self.input_func=input_func;self.caller_stack=[];self.global_stats=None;self.block_stack=[]
+    def run(self,program_ast):self.exec_block(program_ast["body"],self.global_env)
+    def exec_block(self,statements,env):
+        frame={"statements":list(statements),"index":0};self.block_stack.append(frame)
         try:
-            while frame["index"] < len(frame["statements"]):
-                stmt = frame["statements"][frame["index"]]
-                self.exec_statement(stmt, env)
-                frame["index"] += 1
-        finally:
-            self.block_stack.pop()
-
-    def exec_statement(self, stmt, env):
-        kind = stmt["type"]
-        if kind == "AbilityDecl":
-            value = self.eval_expr(stmt["value"], env)
-            env.declare(stmt["name"], value)
-        elif kind == "Assignment":
-            value = self.eval_expr(stmt["value"], env)
-            target = stmt["target"]
-            if target["type"] == "Identifier":
-                env.set_existing(target["name"], value)
-            elif target["type"] == "FieldAccess":
-                obj = self.eval_expr(target["obj"], env)
-                field = target["field"]
-                if isinstance(obj, list) and field.startswith("member_"):
-                    index = self.resolve_member_index(field, env)
-                    if 0 <= index < len(obj):
-                        obj[index] = value
-                    else:
-                        raise DMError(f"There's no item at position {index} in that list.")
-                elif isinstance(obj, dict):
-                    obj[field] = value
-                else:
-                    raise DMError("That's not something you can assign to.")
-            else:
-                raise DMError("That's not something you can assign to.")
-        elif kind == "Narrate":
-            self.output_func(to_scroll(self.eval_expr(stmt["value"], env)))
-        elif kind == "Attempt":
-            for clause in stmt["clauses"]:
-                if self.eval_expr(clause["condition"], env):
-                    self.exec_block(clause["body"], Environment(parent=env))
-                    return
-            if stmt["fail_body"] is not None:
-                self.exec_block(stmt["fail_body"], Environment(parent=env))
-        elif kind == "Adventure":
-            count = self.eval_expr(stmt["count"], env)
+            while frame["index"]<len(frame["statements"]):
+                self.exec_statement(frame["statements"][frame["index"]],env);frame["index"]+=1
+        finally:self.block_stack.pop()
+    def exec_statement(self,stmt,env):
+        kind=stmt["type"]
+        if kind in ("AbilityDecl","PouchDecl"):env.declare(stmt["name"],self.eval_expr(stmt["value"],env))
+        elif kind=="VaultDecl":env.declare(stmt["name"],VaultHandle(to_scroll(self.eval_expr(stmt["path"],env))))
+        elif kind=="Assignment":self.assign_target(stmt["target"],self.eval_expr(stmt["value"],env),env)
+        elif kind=="Narrate":self.output_func(to_scroll(self.eval_expr(stmt["value"],env)))
+        elif kind=="Attempt":
+            for c in stmt["clauses"]:
+                if self.eval_expr(c["condition"],env):self.exec_block(c["body"],Environment(parent=env));return
+            if stmt["fail_body"] is not None:self.exec_block(stmt["fail_body"],Environment(parent=env))
+        elif kind=="Adventure":
             try:
-                for _ in range(int(count)):
-                    try:
-                        self.exec_block(stmt["body"], Environment(parent=env))
-                    except ContinueSignal:
-                        continue
-            except QuitSignal:
-                pass
-        elif kind == "While":
+                for _ in range(int(self.eval_expr(stmt["count"],env))):
+                    try:self.exec_block(stmt["body"],Environment(parent=env))
+                    except ContinueSignal:continue
+            except QuitSignal:pass
+        elif kind=="While":
             try:
-                while self.eval_expr(stmt["condition"], env):
-                    try:
-                        self.exec_block(stmt["body"], Environment(parent=env))
-                    except ContinueSignal:
-                        continue
-            except QuitSignal:
-                pass
-        elif kind == "ForParty":
-            items = self.resolve_party(stmt["args"], env)
+                while self.eval_expr(stmt["condition"],env):
+                    try:self.exec_block(stmt["body"],Environment(parent=env))
+                    except ContinueSignal:continue
+            except QuitSignal:pass
+        elif kind=="ForParty":
             try:
-                for item in items:
-                    inner = Environment(parent=env)
-                    inner.declare(stmt["var"], item)
-                    try:
-                        self.exec_block(stmt["body"], inner)
-                    except ContinueSignal:
-                        continue
-            except QuitSignal:
-                pass
-        elif kind == "Submit":
-            self.exec_submit(stmt, env)
-        elif kind == "Quit":
-            raise QuitSignal()
-        elif kind == "Continue":
-            raise ContinueSignal()
-        elif kind == "QuestDef":
-            self.quests[stmt["name"]] = stmt
-        elif kind == "HomebrewDef":
-            self.define_homebrew(stmt, env)
-        elif kind == "GlobalStats":
-            self.global_stats = self.build_stats(stmt["stats"], stmt["extra_stats"], env)
-        elif kind == "SummonDecl":
-            self.exec_summon(stmt, env)
-        elif kind == "Reword":
-            raise RewordSignal(self.eval_expr(stmt["value"], env))
-        elif kind == "Init":
-            if not self.caller_stack:
-                raise DMError("'init' can't be used outside of a quest.")
-            caller_env = self.caller_stack[-1]
-            for name in stmt["names"]:
-                env.declare(name, caller_env.get(name))
-        elif kind == "ExprStatement":
-            self.eval_expr(stmt["expr"], env)
-        else:
-            raise DMError(f"Unknown statement type '{kind}'.")
-
-    def eval_expr(self, node, env):
-        kind = node["type"]
-        if kind == "NumberLiteral": return node["value"]
-        if kind == "StringLiteral": return node["value"]
-        if kind == "BoolLiteral": return node["value"]
-        if kind == "ListLiteral": return [self.eval_expr(e, env) for e in node["elements"]]
-        if kind == "DiceLiteral": return node["max"]
-        if kind == "Identifier": return env.get(node["name"])
-        if kind == "FieldAccess":
-            obj = self.eval_expr(node["obj"], env); field = node["field"]
-            if isinstance(obj, dict) and field in obj: return obj[field]
-            if isinstance(obj, list) and field.startswith("member_"):
-                index = self.resolve_member_index(field, env)
-                if 0 <= index < len(obj): return obj[index]
-                raise DMError(f"There's no item at position {index} in that list.")
-            raise DMError(f"'{field}' isn't a field on that thing.")
-        if kind == "PlayerInput":
-            raw = self.input_func(to_scroll(self.eval_expr(node["prompt"], env)))
-            return coerce_input(raw)
-        if kind == "UnaryOp":
-            val = self.eval_expr(node["operand"], env)
-            if node["op"] == "-": return -val
-        if kind == "BinaryOp": return self.eval_binary(node, env)
-        if kind == "Embark": return self.call_quest(node["name"], node["args"], env)
-        if kind == "Call": return self.call_builtin(node["name"], node["args"], env)
-        if kind == "CallExpr": return self.eval_call_expr(node, env)
-        if kind == "SolveExpr": return self.eval_solve(node, env)
-        if kind == "ForceExpr": return self.eval_force(node, env)
-        if kind == "SwayExpr": return self.eval_sway(node, env)
-        raise DMError(f"Unknown expression type '{kind}'.")
-
-    def eval_binary(self, node, env):
-        left = self.eval_expr(node["left"], env); right = self.eval_expr(node["right"], env); op = node["op"]
-        if op == "+": return to_scroll(left) + to_scroll(right) if isinstance(left, str) or isinstance(right, str) else left + right
-        if op == "-": return left - right
-        if op == "*": return left * right
-        if op == "/":
-            if right == 0: raise DMError("You can't divide by zero.")
-            return left / right
-        if op == "%":
-            if right == 0: raise DMError("You can't divide by zero.")
-            return left % right
-        if op == "==": return left == right
-        if op == "!=": return left != right
-        if op == ">": return left > right
-        if op == "<": return left < right
-        if op == ">=": return left >= right
-        if op == "<=": return left <= right
-        raise DMError(f"Unknown operator '{op}'.")
-
-    def call_quest(self, name, arg_nodes, env):
-        if name not in self.quests: raise DMError(f"There's no quest called '{name}'.")
-        quest = self.quests[name]; args = [self.eval_expr(a, env) for a in arg_nodes]
-        quest_env = Environment(parent=None)
-        for pname, aval in zip(quest["params"], args): quest_env.declare(pname, aval)
+                for item in self.resolve_party(stmt["args"],env):
+                    inner=Environment(parent=env);inner.declare(stmt["var"],item)
+                    try:self.exec_block(stmt["body"],inner)
+                    except ContinueSignal:continue
+            except QuitSignal:pass
+        elif kind=="Submit":self.exec_submit(stmt,env)
+        elif kind=="Quit":raise QuitSignal()
+        elif kind=="Continue":raise ContinueSignal()
+        elif kind=="Pass":pass
+        elif kind=="Raise":raise DMError(to_scroll(self.eval_expr(stmt["value"],env)))
+        elif kind=="QuestDef":self.quests[stmt["name"]]=stmt
+        elif kind=="HomebrewDef":self.define_homebrew(stmt,env)
+        elif kind=="GlobalStats":self.global_stats=self.build_stats(stmt["stats"],stmt["extra_stats"],env)
+        elif kind=="SummonDecl":self.exec_summon(stmt,env)
+        elif kind=="Reword":raise RewordSignal(self.eval_expr(stmt["value"],env))
+        elif kind=="Init":
+            if not self.caller_stack:raise DMError("'init' can't be used outside of a quest.")
+            caller=self.caller_stack[-1]
+            for name in stmt["names"]:env.declare(name,caller.get(name))
+        elif kind=="ExprStatement":self.eval_expr(stmt["expr"],env)
+        else:raise DMError(f"Unknown statement type '{kind}'.")
+    def assign_target(self,t,v,env):
+        if t["type"]=="Identifier":env.set_existing(t["name"],v);return
+        if t["type"]=="FieldAccess":
+            o=self.eval_expr(t["obj"],env)
+            if not isinstance(o,dict):raise DMError("That's not something you can assign a field on.")
+            o[t["field"]]=v;return
+        if t["type"]=="IndexAccess":self.assign_index(self.eval_expr(t["obj"],env),self.eval_expr(t["index"],env),v);return
+        raise DMError("That's not something you can assign to.")
+    def assign_index(self,o,i,v):
+        if isinstance(o,list):
+            i=int(i)
+            if i<0:raise DMError("A list position can't be negative.")
+            if i>=len(o):o.extend([None]*(i+1-len(o)))
+            o[i]=v
+        elif isinstance(o,dict):o[i]=v
+        else:raise DMError("Only lists and pouches can be indexed for assignment.")
+    def eval_expr(self,n,env):
+        k=n["type"]
+        if k=="NumberLiteral":return n["value"]
+        if k=="StringLiteral":return n["value"]
+        if k=="BoolLiteral":return n["value"]
+        if k=="NoneLiteral":return None
+        if k=="ListLiteral":return [self.eval_expr(x,env) for x in n["elements"]]
+        if k=="PouchLiteral":return {self.eval_expr(a,env):self.eval_expr(b,env) for a,b in n["pairs"]}
+        if k=="DiceLiteral":return n["max"]
+        if k=="Identifier":return env.get(n["name"])
+        if k=="FieldAccess":
+            o=self.eval_expr(n["obj"],env);f=n["field"]
+            if isinstance(o,dict) and f in o:return o[f]
+            if isinstance(o,list) and f.startswith('member_'):return self.index_value(o,self.resolve_member_index(f,env))
+            raise DMError(f"'{f}' isn't a field on that thing.")
+        if k=="IndexAccess":return self.index_value(self.eval_expr(n["obj"],env),self.eval_expr(n["index"],env))
+        if k=="PlayerInput":return coerce_input(self.input_func(to_scroll(self.eval_expr(n["prompt"],env))))
+        if k=="UnaryOp":return -self.eval_expr(n["operand"],env) if n["op"]=='-' else self.eval_expr(n["operand"],env)
+        if k=="BinaryOp":return self.eval_binary(n,env)
+        if k=="Embark":return self.call_quest(n["name"],n["args"],env)
+        if k=="Call":return self.call_builtin(n["name"],n["args"],env)
+        if k=="CallExpr":return self.eval_call_expr(n,env)
+        if k=="SolveExpr":return self.eval_solve(n,env)
+        if k=="ForceExpr":return self.eval_force(n,env)
+        if k=="SwayExpr":return self.eval_sway(n,env)
+        raise DMError(f"Unknown expression type '{k}'.")
+    def index_value(self,o,i):
+        if isinstance(o,(list,str)):
+            try:return o[int(i)]
+            except (IndexError,ValueError):raise DMError(f"There's no item at position {i} in that sequence.")
+        if isinstance(o,dict):
+            if i not in o:raise DMError(f"That pouch has no key '{to_scroll(i)}'.")
+            return o[i]
+        raise DMError("Only lists, Scrolls, and pouches can be indexed.")
+    def eval_binary(self,n,env):
+        a=self.eval_expr(n['left'],env);b=self.eval_expr(n['right'],env);o=n['op']
+        if o=='+':return to_scroll(a)+to_scroll(b) if isinstance(a,str) or isinstance(b,str) else a+b
+        if o=='-':return a-b
+        if o=='*':return a*b
+        if o in ('/','%') and b==0:raise DMError("You can't divide by zero.")
+        if o=='/':return a/b
+        if o=='%':return a%b
+        if o=='==':return a==b
+        if o=='!=':return a!=b
+        if o=='>':return a>b
+        if o=='<':return a<b
+        if o=='>=':return a>=b
+        if o=='<=':return a<=b
+        raise DMError(f"Unknown operator '{o}'.")
+    def call_quest(self,name,nodes,env):
+        if name not in self.quests:raise DMError(f"There's no quest called '{name}'.")
+        q=self.quests[name];args=[self.eval_expr(x,env) for x in nodes];qe=Environment()
+        for p,a in zip(q['params'],args):qe.declare(p,a)
         self.caller_stack.append(env)
-        try:
-            self.exec_block(quest["body"], quest_env); return None
-        except RewordSignal as r: return r.value
-        finally: self.caller_stack.pop()
-
-    def resolve_member_index(self, field, env):
-        remainder = field[len("member_"):]
-        if remainder.isdigit(): return int(remainder)
-        return int(env.get(remainder))
-
-    def call_builtin(self, name, arg_nodes, env):
-        args = [self.eval_expr(a, env) for a in arg_nodes]
-        if name == "roll":
-            size = args[0]
-            if size == 0: return 0
-            return random.randint(1, int(size))
-        if name in ("endure", "perceive"): return self.run_plain_stat_function(name, args)
-        if name == "max": return max(args[0]) if len(args) == 1 else max(args)
-        if name == "min": return min(args[0]) if len(args) == 1 else min(args)
-        if name == "len": return len(args[0])
-        if name == "num":
-            raw = args[0]
+        try:self.exec_block(q['body'],qe);return None
+        except RewordSignal as r:return r.value
+        finally:self.caller_stack.pop()
+    def resolve_member_index(self,f,env):
+        r=f[len('member_'):];return int(r) if r.isdigit() else int(env.get(r))
+    def call_builtin(self,name,nodes,env):
+        if name in ('map','filter','reduce'):
+            args=[self.eval_expr(nodes[0],env)] if nodes else []
+            args += [self.eval_expr(x,env) for x in nodes[2:]]
+            return self.run_functional(name,nodes,args,env)
+        args=[self.eval_expr(x,env) for x in nodes]
+        if name=='roll':return 0 if args[0]==0 else random.randint(1,int(args[0]))
+        if name in ('endure','perceive'):return self.run_plain_stat_function(name,args)
+        if name=='max':return max(args[0]) if len(args)==1 else max(args)
+        if name=='min':return min(args[0]) if len(args)==1 else min(args)
+        if name=='len':return len(args[0])
+        if name=='sum':return sum(args[0]) if len(args)==1 else sum(args)
+        if name=='abs':return abs(args[0])
+        if name=='round':return round(args[0]) if len(args)==1 else round(args[0],int(args[1]))
+        if name=='sorted':return sorted(args[0])
+        if name=='reversed':return list(reversed(args[0]))
+        if name=='reverse':
+            if not isinstance(args[0],list):raise DMError("'reverse' needs a list.")
+            args[0].reverse();return args[0]
+        if name=='any':return any(args[0])
+        if name=='all':return all(args[0])
+        if name=='zip':
+            if any(not isinstance(x,list) for x in args):raise DMError("'zip' needs lists.")
+            return [list(row) for row in zip(*args)]
+        if name=='enumerate':return [{'index':i,'value':v} for i,v in enumerate(args[0])]
+        if name=='type':return classify_value(args[0])
+        if name=='bool':return bool(args[0])
+        if name=='num':
             try:
-                if isinstance(raw, (int, float)): return raw
-                if "." in raw: return float(raw)
-                return int(raw)
-            except ValueError: raise ValueError(f"'{raw}' isn't a valid number.")
-        if name == "str": return to_scroll(args[0])
+                s=to_scroll(args[0]).strip();return float(s) if '.' in s else int(s)
+            except (ValueError,TypeError):raise ValueError(f"'{to_scroll(args[0])}' isn't a valid number.")
+        if name=='str':return to_scroll(args[0])
+        if name=='list':return list(args[0]) if isinstance(args[0],(list,str)) else list(args[0].keys()) if isinstance(args[0],dict) else [args[0]]
+        if name=='pouch':
+            if isinstance(args[0],dict):return dict(args[0])
+            if isinstance(args[0],list):return {p[0]:p[1] for p in args[0] if isinstance(p,list) and len(p)==2}
+            raise DMError("'pouch' needs a pouch or a list of key-value pairs.")
+        if name=='contains':
+            if len(args)!=2:raise DMError("'contains' needs a collection and a value.")
+            return args[1] in args[0]
+        if name=='index':
+            try:return args[0].index(args[1])
+            except (ValueError,AttributeError):return -1
+        if name in ('append','push'):
+            if len(args)!=2:raise DMError(f"'{name}' needs two values.")
+            if isinstance(args[0],list):args[0].append(args[1]);return args[0]
+            if isinstance(args[0],VaultHandle):self._vault_append(args[0],to_scroll(args[1]));return args[0]
+            raise DMError(f"'{name}' needs a list or vault as its first value.")
+        if name=='pop':
+            if not isinstance(args[0],list) or not args[0]:raise DMError("'pop' needs a non-empty list.")
+            return args[0].pop(-1 if len(args)==1 else int(args[1]))
+        if name=='read':return self._vault_read(args[0])
+        if name=='write':self._vault_write(args[0],to_scroll(args[1]));return None
+        if name in ('close','seal'):
+            if not isinstance(args[0],VaultHandle):raise DMError("'close' needs a vault.")
+            args[0].closed=True;return None
+        if name=='exists':return os.path.exists(self._vault_path(args[0]))
+        if name=='remove':
+            try:os.remove(self._vault_path(args[0]))
+            except FileNotFoundError:pass
+            return None
+        if name=='forget':
+            if not nodes or nodes[0].get('type')!='Identifier':raise DMError("'forget' expects a variable name.")
+            if not env.forget(nodes[0]['name']):raise DMError(f"'{nodes[0]['name']}' doesn't exist.")
+            return None
+        if name=='memory':return len(repr(self.global_env.vars).encode('utf-8'))
         raise DMError(f"There's no built-in called '{name}'.")
-
-    def resolve_party(self, arg_nodes, env):
-        args = [self.eval_expr(a, env) for a in arg_nodes]
-        if len(args) == 1:
-            a = args[0]
-            if isinstance(a, dict): return list(a.keys())
-            if isinstance(a, list): return a
-            return list(range(int(a)))
-        if len(args) == 2: return list(range(int(args[0]), int(args[1])))
-        raise DMError("party(...) takes 1 or 2 arguments.")
-
-    def exec_submit(self, stmt, env):
+    def run_functional(self,name,nodes,args,env):
+        if len(nodes)!=2 and not (name=='reduce' and len(nodes)==3):raise DMError(f"'{name}' needs a list and a quest.")
+        values=args[0]
+        op=nodes[1];qname=op.get('name') if op.get('type')=='Identifier' else op.get('value') if op.get('type')=='StringLiteral' else None
+        if qname not in self.quests:raise DMError(f"There's no quest called '{qname}'.")
+        if not isinstance(values,list):raise DMError(f"'{name}' needs a list as its first value.")
+        if name=='map':return [self.call_quest(qname,[value_to_literal_node(x)],env) for x in values]
+        if name=='filter':return [x for x in values if self.call_quest(qname,[value_to_literal_node(x)],env)]
+        if len(args)==2:
+            if not values:raise DMError("'reduce' can't reduce an empty list without a starting value.")
+            acc=values[0];items=values[1:]
+        else:acc=args[1];items=values
+        for item in items:acc=self.call_quest(qname,[value_to_literal_node(acc),value_to_literal_node(item)],env)
+        return acc
+    def _vault_path(self,v):
+        if isinstance(v,VaultHandle):v.check();return v.path
+        if isinstance(v,str):return v
+        raise DMError("That isn't a vault or file path.")
+    def _vault_read(self,v):
+        p=self._vault_path(v)
         try:
-            self.exec_block(stmt["body"], Environment(parent=env))
-        except (QuitSignal, ContinueSignal, RewordSignal):
-            raise
+            with open(p,'r',encoding='utf-8') as f:return f.read()
+        except FileNotFoundError:raise DMError(f"The vault '{p}' doesn't exist yet.")
+    def _vault_write(self,v,data):
+        p=self._vault_path(v)
+        try:
+            with open(p,'w',encoding='utf-8') as f:f.write(data)
+        except OSError as e:raise DMError(f"The DM couldn't write '{p}': {e}")
+    def _vault_append(self,v,data):
+        p=self._vault_path(v)
+        try:
+            with open(p,'a',encoding='utf-8') as f:f.write(data)
+        except OSError as e:raise DMError(f"The DM couldn't inscribe '{p}': {e}")
+    def resolve_party(self,nodes,env):
+        a=[self.eval_expr(x,env) for x in nodes]
+        if len(a)==1:
+            if isinstance(a[0],dict):return list(a[0].keys())
+            if isinstance(a[0],(list,str)):return list(a[0])
+            return list(range(int(a[0])))
+        if len(a)==2:return list(range(int(a[0]),int(a[1])))
+        raise DMError("party(...) takes 1 or 2 arguments.")
+    def exec_submit(self,stmt,env):
+        caught=False
+        try:self.exec_block(stmt['body'],Environment(parent=env))
+        except (QuitSignal,ContinueSignal,RewordSignal):raise
         except Exception as e:
-            for clause in stmt["considers"]:
-                name = clause["error_name"]
-                matches = name is None or (name == "ValueError" and isinstance(e, ValueError)) or (name == "DMError" and isinstance(e, DMError)) or (name == "ZeroDivisionError" and isinstance(e, ZeroDivisionError))
-                if matches:
-                    self.exec_block(clause["body"], Environment(parent=env)); return
-            raise
-
-    def define_homebrew(self, stmt, env):
-        kind = stmt["kind"]
-        if kind not in SHAPE_RULES: raise DMError(f"'{kind}' isn't a real homebrew kind. Choose character, item, monster, or spell.")
-        values = {fname: self.eval_expr(expr, env) for fname, expr in stmt["fields"].items()}
-        filled = self.fill_shape(kind, values)
-        for fname, val in filled.items():
-            if fname not in stmt["fields"]: stmt["fields"][fname] = value_to_literal_node(val)
-        self.homebrews[stmt["name"]] = stmt
-
-    def fill_shape(self, kind, values):
-        rules = SHAPE_RULES[kind]; type_counts = {}
-        for v in values.values():
-            t = classify_value(v); type_counts[t] = type_counts.get(t, 0) + 1
-        def counted_total(): return sum(min(c, rules["max_per_type"]) for c in type_counts.values())
-        filler_cycle = ["number", "Scroll", "list", "honor/lie"]
-        defaults = {"number": 0, "Scroll": "", "list": [], "honor/lie": False}
-        i = 0
-        while counted_total() < rules["min_total"] or len(type_counts) < rules["min_types"]:
-            missing = [t for t in filler_cycle if t not in type_counts]
-            new_type = missing[0] if len(type_counts) < rules["min_types"] and missing else filler_cycle[i % len(filler_cycle)]
-            placeholder_name = f"_auto_{new_type.replace('/', '_')}_{i}"
-            values[placeholder_name] = defaults[new_type]; type_counts[new_type] = type_counts.get(new_type, 0) + 1; i += 1
+            for c in stmt['considers']:
+                n=c['error_name'];match=n is None or (n=='ValueError' and isinstance(e,ValueError)) or (n=='DMError' and isinstance(e,DMError)) or (n=='OSError' and isinstance(e,OSError))
+                if match:self.exec_block(c['body'],Environment(parent=env));caught=True;break
+            if not caught:raise
+        finally:
+            if stmt.get('finally_body') is not None:self.exec_block(stmt['finally_body'],Environment(parent=env))
+    def define_homebrew(self,stmt,env):
+        k=stmt['kind']
+        if k not in SHAPE_RULES:raise DMError(f"'{k}' isn't a real homebrew kind.")
+        vals={n:self.eval_expr(e,env) for n,e in stmt['fields'].items()};filled=self.fill_shape(k,vals)
+        for n,v in filled.items():
+            if n not in stmt['fields']:stmt['fields'][n]=value_to_literal_node(v)
+        self.homebrews[stmt['name']]=stmt
+    def fill_shape(self,k,values):
+        r=SHAPE_RULES[k];counts={}
+        for v in values.values():t=classify_value(v);counts[t]=counts.get(t,0)+1
+        def total():return sum(min(c,r['max_per_type']) for c in counts.values())
+        cyc=['number','Scroll','list','honor/lie'];defs={'number':0,'Scroll':'','list':[],'honor/lie':False};i=0
+        while total()<r['min_total'] or len(counts)<r['min_types']:
+            missing=[t for t in cyc if t not in counts];t=missing[0] if len(counts)<r['min_types'] and missing else cyc[i%len(cyc)];values[f'_auto_{t.replace("/","_")}_{i}']=defs[t];counts[t]=counts.get(t,0)+1;i+=1
         return values
-
-    def build_stats(self, stats_exprs, extra_exprs, env):
-        stats = {}
-        for sname in DEFAULT_STAT_NAMES:
-            number = self.eval_expr(stats_exprs[sname], env) if sname in stats_exprs else 10
-            stats[sname] = {"number": number, "mod": math.floor((number - 10) / 2)}
-        for ename, expr in extra_exprs.items():
-            number = self.eval_expr(expr, env); stats[ename] = {"number": number, "mod": math.floor((number - 10) / 2)}
-        return stats
-
-    def get_global_stats(self):
-        return self.global_stats if self.global_stats is not None else {s: {"number": 10, "mod": 0} for s in DEFAULT_STAT_NAMES}
-
-    def exec_summon(self, stmt, env):
-        tmpl = self.homebrews.get(stmt["template"])
-        if tmpl is None: raise DMError(f"There's no homebrew called '{stmt['template']}'.")
-        instance = {fname: self.eval_expr(expr, env) for fname, expr in tmpl["fields"].items()}
-        instance["STATS"] = self.build_stats(tmpl["stats"], tmpl["extra_stats"], env); instance["__kind__"] = tmpl["kind"]
-        env.declare(stmt["var_name"], instance)
-
-    def eval_call_expr(self, node, env):
-        callee = node["callee"]
-        if callee["type"] == "FieldAccess" and callee["field"] in ("mod", "number") and callee["obj"]["type"] == "FieldAccess" and callee["obj"]["field"] in STAT_FUNC_TO_STAT:
-            args = [self.eval_expr(a, env) for a in node["args"]]; stat_func = callee["obj"]["field"]; mode = callee["field"]; instance = self.eval_expr(callee["obj"]["obj"], env)
-            return self.run_stat_function(stat_func, instance, mode, args)
-        if callee["type"] == "Identifier" and callee["name"] in ("endure", "perceive"):
-            return self.run_plain_stat_function(callee["name"], [self.eval_expr(a, env) for a in node["args"]])
-        if callee["type"] == "FieldAccess":
-            obj = self.eval_expr(callee["obj"], env)
-            if isinstance(obj, str): return self.run_string_method(obj, callee["field"], [self.eval_expr(a, env) for a in node["args"]])
+    def build_stats(self,se,ee,env):
+        out={}
+        for s in DEFAULT_STAT_NAMES:
+            n=self.eval_expr(se[s],env) if s in se else 10;out[s]={'number':n,'mod':math.floor((n-10)/2)}
+        for s,e in ee.items():n=self.eval_expr(e,env);out[s]={'number':n,'mod':math.floor((n-10)/2)}
+        return out
+    def get_global_stats(self):return self.global_stats if self.global_stats is not None else {s:{'number':10,'mod':0} for s in DEFAULT_STAT_NAMES}
+    def exec_summon(self,stmt,env):
+        t=self.homebrews.get(stmt['template'])
+        if t is None:raise DMError(f"There's no homebrew called '{stmt['template']}'.")
+        x={n:self.eval_expr(e,env) for n,e in t['fields'].items()};x['STATS']=self.build_stats(t['stats'],t['extra_stats'],env);x['__kind__']=t['kind'];env.declare(stmt['var_name'],x)
+    def eval_call_expr(self,n,env):
+        c=n['callee']
+        if c['type']=='FieldAccess' and c['field'] in ('mod','number') and c['obj']['type']=='FieldAccess' and c['obj']['field'] in STAT_FUNC_TO_STAT:
+            return self.run_stat_function(c['obj']['field'],self.eval_expr(c['obj']['obj'],env),c['field'],[self.eval_expr(a,env) for a in n['args']])
+        if c['type']=='Identifier' and c['name'] in ('endure','perceive'):return self.run_plain_stat_function(c['name'],[self.eval_expr(a,env) for a in n['args']])
+        if c['type']=='FieldAccess':
+            o=self.eval_expr(c['obj'],env)
+            if isinstance(o,str):return self.run_string_method(o,c['field'],[self.eval_expr(a,env) for a in n['args']])
         raise DMError("That's not something you can call like that.")
-
-    def run_string_method(self, s, method, args):
-        if method == "lower": return s.lower()
-        if method == "upper": return s.upper()
-        if method == "trim": return s.strip()
-        if method == "clean": return " ".join(s.split())
-        if method == "title": return s.title()
-        if method == "starts": return s.startswith(to_scroll(args[0]))
-        if method == "ends": return s.endswith(to_scroll(args[0]))
-        if method == "contains": return to_scroll(args[0]) in s
-        if method == "empty": return len(s) == 0
-        if method == "words": return s.split()
-        if method == "split": return s.split(to_scroll(args[0])) if args else s.split()
-        if method == "join": return s.join(to_scroll(v) for v in args[0])
-        if method == "find": return s.find(to_scroll(args[0]))
-        if method == "count": return s.count(to_scroll(args[0]))
-        raise DMError(f"Scrolls don't have a '{method}' method.")
-
-    def run_stat_function(self, stat_func, instance, mode, args):
-        if not isinstance(instance, dict) or "STATS" not in instance: raise DMError(f"That doesn't have STATS to use '{stat_func}' with.")
-        stat_name = STAT_FUNC_TO_STAT[stat_func]; stat_value = instance["STATS"][stat_name][mode]
-        if stat_func == "endure":
-            x, times = args[0], args[1]; rate = stat_value * (0.05 if mode == "mod" else 0.005)
-            for _ in range(int(times)): x = x - (x * rate)
+    def run_string_method(self,s,m,a):
+        x=to_scroll(a[0]) if a else None
+        if m=='lower':return s.lower()
+        if m=='upper':return s.upper()
+        if m=='trim':return s.strip()
+        if m=='clean':return ' '.join(s.split())
+        if m=='title':return s.title()
+        if m=='starts':return s.startswith(x)
+        if m=='ends':return s.endswith(x)
+        if m=='contains':return x in s
+        if m=='empty':return not s
+        if m=='words':return s.split()
+        if m=='split':return s.split(x) if a else s.split()
+        if m=='join':return s.join(to_scroll(v) for v in a[0])
+        if m=='find':return s.find(x)
+        if m=='count':return s.count(x)
+        if m=='replace':return s.replace(x,to_scroll(a[1]),int(a[2]) if len(a)>2 else -1)
+        raise DMError(f"Scrolls don't have a '{m}' method.")
+    def run_stat_function(self,sf,inst,mode,args):
+        if not isinstance(inst,dict) or 'STATS' not in inst:raise DMError("That doesn't have STATS.")
+        v=inst['STATS'][STAT_FUNC_TO_STAT[sf]][mode]
+        if sf=='endure':
+            x,t=args;rate=v*(0.05 if mode=='mod' else 0.005)
+            for _ in range(int(t)):x=x-x*rate
             return x
-        if stat_func == "perceive":
-            values = args[0]; return sum(values) / len(values) + stat_value
-        raise DMError(f"Unknown stat function '{stat_func}'.")
-
-    def run_plain_stat_function(self, name, args):
-        if name == "endure":
-            x, times, rate_percent = args; rate = rate_percent / 100
-            for _ in range(int(times)): x = x - (x * rate)
+        return sum(args[0])/len(args[0])+v
+    def run_plain_stat_function(self,n,a):
+        if n=='endure':
+            x,t,r=a
+            for _ in range(int(t)):x=x-x*(r/100)
             return x
-        if name == "perceive": return sum(args[0]) / len(args[0])
-        raise DMError(f"Unknown built-in '{name}'.")
+        return sum(a[0])/len(a[0])
+    def eval_force(self,n,env):return apply_math_symbol(self.resolve_stat_value('STR',n['mode'],n['instance'],env),n['symbol'],self.eval_expr(n['value'],env))
+    def eval_sway(self,n,env):
+        if not self.block_stack:raise DMError("sway can't be used outside of a block.")
+        f=self.block_stack[-1];ss=f['statements'];a=int(self.eval_expr(n['address'],env))
+        if a<0 or a>=len(ss):raise DMError(f"There's no line at address {a} to move.")
+        if a<=f['index']:raise DMError("You can't move a line that's already happened.")
+        d=max(f['index']+1,min(a+int(self.resolve_shift(n['shift'],n['instance'],env)),len(ss)-1));x=ss.pop(a);ss.insert(d,x)
+    def resolve_shift(self,n,i,env):return n['value'] if n['type']=='ShiftLiteral' else self.resolve_stat_value(n['stat'] or 'CHA',n['mode'],i,env)
+    def resolve_stat_value(self,s,m,i,env):return (self.eval_expr(i,env)['STATS'] if i is not None else self.get_global_stats())[s][m]
+    def eval_solve(self,n,env):
+        i=self.eval_expr(n['instance'],env);d=self.eval_expr(n['difficulty'],env);size=i['STATS']['INT'][n['mode']];r=0 if size<=0 else random.randint(1,int(size));return {'/':r>d,'_':r==d,'\\':r<d,'/_':r>=d,'\\_':r<=d}[n['comparator']]
 
-    def eval_force(self, node, env):
-        return apply_math_symbol(self.resolve_stat_value("STR", node["mode"], node["instance"], env), node["symbol"], self.eval_expr(node["value"], env))
-
-    def eval_sway(self, node, env):
-        if not self.block_stack: raise DMError("sway can't be used outside of a block.")
-        frame = self.block_stack[-1]; stmts = frame["statements"]; address = int(self.eval_expr(node["address"], env))
-        if address < 0 or address >= len(stmts): raise DMError(f"There's no line at address {address} to move.")
-        if address <= frame["index"]: raise DMError("You can't move a line that's already happened.")
-        shift = self.resolve_shift(node["shift"], node["instance"], env); dest = max(frame["index"] + 1, min(address + int(shift), len(stmts) - 1))
-        item = stmts.pop(address); stmts.insert(dest, item); return None
-
-    def resolve_shift(self, shift_node, instance_node, env):
-        if shift_node["type"] == "ShiftLiteral": return shift_node["value"]
-        return self.resolve_stat_value(shift_node["stat"] or "CHA", shift_node["mode"], instance_node, env)
-
-    def resolve_stat_value(self, stat_name, mode, instance_node, env):
-        stats = self.eval_expr(instance_node, env)["STATS"] if instance_node is not None else self.get_global_stats()
-        if stat_name not in stats: raise DMError(f"'{stat_name}' isn't a stat there.")
-        return stats[stat_name][mode]
-
-    def eval_solve(self, node, env):
-        instance = self.eval_expr(node["instance"], env)
-        if not isinstance(instance, dict) or "STATS" not in instance: raise DMError("That doesn't have STATS to run a solve check with.")
-        difficulty = self.eval_expr(node["difficulty"], env); die_size = instance["STATS"]["INT"][node["mode"]]
-        roll_result = 0 if die_size <= 0 else random.randint(1, int(die_size)); comparator = node["comparator"]
-        if comparator == "/": return roll_result > difficulty
-        if comparator == "_": return roll_result == difficulty
-        if comparator == "\\": return roll_result < difficulty
-        if comparator == "/_": return roll_result >= difficulty
-        if comparator == "\\_": return roll_result <= difficulty
-        raise DMError(f"Unknown comparator '{comparator}'.")
-
-
-def apply_math_symbol(a, symbol, b):
-    if symbol == "+": return a + b
-    if symbol == "-": return a - b
-    if symbol == "*": return a * b
-    if symbol == "/":
-        if b == 0: raise DMError("You can't divide by zero.")
-        return a / b
-    if symbol == "%":
-        if b == 0: raise DMError("You can't divide by zero.")
-        return a % b
-    raise DMError(f"Unknown math symbol '{symbol}'.")
-
-
-def value_to_literal_node(val):
-    if isinstance(val, bool): return {"type": "BoolLiteral", "value": val}
-    if isinstance(val, (int, float)): return {"type": "NumberLiteral", "value": val}
-    if isinstance(val, list): return {"type": "ListLiteral", "elements": [value_to_literal_node(v) for v in val]}
-    if val is None: return {"type": "Identifier", "name": "none"}
-    return {"type": "StringLiteral", "value": val}
-
+def apply_math_symbol(a,s,b):
+    if s=='+':return a+b
+    if s=='-':return a-b
+    if s=='*':return a*b
+    if s=='/':
+        if b==0:raise DMError("You can't divide by zero.")
+        return a/b
+    if s=='%':
+        if b==0:raise DMError("You can't divide by zero.")
+        return a%b
+    raise DMError(f"Unknown math symbol '{s}'.")
 
 def coerce_input(raw):
-    try:
-        if "." in raw: return float(raw)
-        return int(raw)
-    except ValueError: return raw
-
-
-# ---------------------------------------------------------------------------
-# v5 core list operations and major.minor diagnostics
-# ---------------------------------------------------------------------------
-
-_original_run = Interpreter.run
-_original_exec = Interpreter.exec_statement
-_original_eval = Interpreter.eval_expr
-_original_builtin = Interpreter.call_builtin
-
-
-def _address_tree(program_ast):
-    """Assign addresses in the exact source-line order used by the IDE.
-
-    The current IDE counts every nonblank indented source line as a minor,
-    including control headers such as `or_attempt`, `fail`, and `consider`.
-    The AST collapses those headers, so we reserve their minor slots here.
-    """
-    def process_children(stmt, major, counter):
-        kind = stmt.get("type")
-        if kind in ("Adventure", "While", "ForParty", "QuestDef"):
-            process_block(stmt.get("body", []), major, counter)
-        elif kind == "Attempt":
-            clauses = stmt.get("clauses", [])
-            if clauses:
-                process_block(clauses[0].get("body", []), major, counter)
-                for clause in clauses[1:]:
-                    counter[0] += 1
-                    process_block(clause.get("body", []), major, counter)
-            if stmt.get("fail_body") is not None:
-                counter[0] += 1
-                process_block(stmt.get("fail_body", []), major, counter)
-        elif kind == "Submit":
-            process_block(stmt.get("body", []), major, counter)
-            for clause in stmt.get("considers", []):
-                counter[0] += 1
-                process_block(clause.get("body", []), major, counter)
-
-    def process_block(statements, major, counter):
-        for child in statements:
-            child["address"] = f"{major}.{counter[0]}"
-            counter[0] += 1
-            process_children(child, major, counter)
-
-    for major, stmt in enumerate(program_ast.get("body", [])):
-        stmt["address"] = str(major)
-        process_children(stmt, major, [0])
-
-
-def _v5_run_fixed(self, program_ast):
-    _address_tree(program_ast)
-    return _original_run(self, program_ast)
-
-
-def _v5_exec_fixed(self, stmt, env):
-    try:
-        if stmt.get("type") == "Assignment" and stmt["target"].get("type") == "FieldAccess":
-            obj = self.eval_expr(stmt["target"]["obj"], env)
-            field = stmt["target"]["field"]
-            if isinstance(obj, list) and field.startswith("member_"):
-                value = self.eval_expr(stmt["value"], env)
-                index = self.resolve_member_index(field, env)
-                if index < 0: raise DMError("A list position can't be negative.")
-                if index >= len(obj): obj.extend([None] * (index + 1 - len(obj)))
-                obj[index] = value
-                return
-        return _original_exec(self, stmt, env)
-    except DMError as exc:
-        text = str(exc)
-        if " (line " not in text and stmt.get("address") is not None:
-            prefix = "That's not within your ability"
-            message = text[len(prefix):].lstrip(": ") if text.startswith(prefix) else text
-            raise DMError(message, stmt["address"]) from None
-        raise
-
-
-def _v5_eval_fixed(self, node, env):
-    if node.get("type") == "Identifier" and node.get("name") == "none":
-        return None
-    return _original_eval(self, node, env)
-
-
-def _as_literal(value):
-    if value is None: return {"type": "Identifier", "name": "none"}
-    return value_to_literal_node(value)
-
-
-def _v5_builtin_fixed(self, name, arg_nodes, env):
-    if name not in {"append", "push", "pop", "map", "filter", "contains", "index"}:
-        return _original_builtin(self, name, arg_nodes, env)
-    args = [self.eval_expr(node, env) for node in arg_nodes]
-    if name in {"append", "push"}:
-        if len(args) != 2 or not isinstance(args[0], list): raise DMError(f"'{name}' needs a list and a value.")
-        args[0].append(args[1]); return args[0]
-    if name == "pop":
-        if not (1 <= len(args) <= 2) or not isinstance(args[0], list): raise DMError("'pop' needs a list, and can optionally take an index.")
-        if not args[0]: raise DMError("You can't pop from an empty list.")
-        index = -1 if len(args) == 1 else int(args[1]); index = index + len(args[0]) if index < 0 else index
-        if index < 0 or index >= len(args[0]): raise DMError(f"There's no item at position {index} in that list.")
-        return args[0].pop(index)
-    if name in {"contains", "index"}:
-        if len(args) != 2 or not isinstance(args[0], list): raise DMError(f"'{name}' needs a list and a value.")
-        if name == "contains": return args[1] in args[0]
-        try: return args[0].index(args[1])
-        except ValueError: return -1
-    if name in {"map", "filter"}:
-        if len(arg_nodes) != 2: raise DMError(f"'{name}' needs a list and an operation.")
-        values = args[0]
-        if not isinstance(values, list): raise DMError(f"'{name}' needs a list as its first argument.")
-        op = arg_nodes[1]
-        if op.get("type") == "Identifier": op_name = op["name"]
-        elif op.get("type") == "StringLiteral": op_name = op["value"]
-        else: raise DMError(f"'{name}' needs a quest name or Scroll as its operation.")
-        if op_name not in self.quests: raise DMError(f"There's no quest called '{op_name}'.")
-        result = []
-        for item in values:
-            transformed = self.call_quest(op_name, [_as_literal(item)], env)
-            if name == "map" or bool(transformed): result.append(transformed)
-        return result
-    raise DMError(f"There's no list built-in called '{name}'.")
-
-
-def _v5_scroll_fixed(value):
-    if value is None: return "none"
-    return _old_scroll(value)
-
-_old_scroll = to_scroll
-Interpreter.run = _v5_run_fixed
-Interpreter.exec_statement = _v5_exec_fixed
-Interpreter.eval_expr = _v5_eval_fixed
-Interpreter.call_builtin = _v5_builtin_fixed
-to_scroll = _v5_scroll_fixed
+    try:s=raw.strip();return float(s) if '.' in s else int(s)
+    except (ValueError,AttributeError):return raw
