@@ -1,0 +1,35 @@
+-- V6 language core regression test --
+ability nums = [1, 2, 3]
+pouch hero = {"name": "Hero", "hp": 20}
+hero["hp"] = 15
+narrate(hero["name"])
+narrate(hero["hp"])
+narrate(type(none))
+narrate(sum(nums))
+narrate(sorted([3, 1, 2]))
+narrate(reversed(nums))
+narrate(any([lie, honor]))
+narrate(all([honor, honor]))
+
+quest double(x):
+    reward x * 2
+
+quest add(a, b):
+    reward a + b
+
+narrate(map(nums, double))
+narrate(reduce(nums, add, 0))
+
+attempt (1 == 2):
+    narrate("bad")
+or_attempt (1 == 1):
+    narrate("branch")
+fail:
+    narrate("fail")
+
+submit:
+    raise "demo failure"
+consider issue DMError:
+    narrate("caught")
+finally:
+    narrate("cleanup")
