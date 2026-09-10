@@ -57,17 +57,6 @@ def tokenize(source):
     minor = None
 
     for line_num, raw_line in enumerate(lines, start=1):
-        adventure_match = re.match(
-            r"^(?P<indent>[ \t]*)adventure\s+(?P<var>[A-Za-z_][A-Za-z0-9_]*)"
-            r"\s+in\s+(?P<total>.+):\s*$",
-            raw_line,
-        )
-        if adventure_match:
-            raw_line = (
-                f"{adventure_match.group('indent')}for {adventure_match.group('var')} "
-                f"in party({adventure_match.group('total')}):"
-            )
-
         line = strip_comments(raw_line)
         if line.strip() == "":
             continue
@@ -75,6 +64,9 @@ def tokenize(source):
         stripped = line.lstrip(" \t")
         indent = len(line) - len(stripped)
 
+        # Addresses count nonblank source lines. Top-level statements are
+        # 0, 1, 2...; indented statements under the current top-level line
+        # are 0.0, 0.1, 0.2, etc. Blank lines do not consume an address.
         if indent == 0:
             major += 1
             minor = None
@@ -94,7 +86,7 @@ def tokenize(source):
         while pos < len(stripped):
             match = MASTER_PATTERN.match(stripped, pos)
             if not match:
-                raise SyntaxError(f"The DM doesn't understand '{stripped[pos]}' at line {address}.")
+                raise SyntaxError(f"The DM doesn't understand '{stripped[pos]}' at line {line_num} (address {address}).")
             kind = match.lastgroup
             value = match.group()
             pos = match.end()
