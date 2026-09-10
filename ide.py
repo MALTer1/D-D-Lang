@@ -247,10 +247,6 @@ class DndIDE:
         self.editor.tag_configure("string", foreground="#CE9178")
         self.editor.tag_configure("number", foreground="#B5CEA8")
         self.editor.tag_configure("comment", foreground="#6A9955")
-
-        # Tkinter tag priority is independent of tag_add order. Numbers are a
-        # separate tag from quoted Scrolls, so explicitly put Scrolls above
-        # numbers to keep digits such as "10" in Scroll color.
         self.editor.tag_raise("string", "number")
 
     ALL_TAGS = ("decl", "control", "io", "bool", "builtin", "statname",
@@ -327,8 +323,18 @@ class DndIDE:
         for tag in self.ALL_TAGS:
             self.editor.tag_remove(tag, "1.0", "end")
 
-        # Numbers are applied first so the later Scroll tag always wins for
-        # digits that happen to appear inside quoted text such as "10" or "A2".
+        # Find protected regions first. Nothing else is allowed to paint over
+        # quoted Scrolls or comments.
+        protected = []
+        for pattern in (STRING_PATTERN, COMMENT_PATTERN):
+            for m in re.finditer(pattern, text, re.MULTILINE):
+                protected.append((m.start(), m.end()))
+
+        def is_protected(match):
+            start, end = match.start(), match.end()
+            return any(start < p_end and end > p_start for p_start, p_end in protected)
+
+        # Apply ordinary syntax colors only outside protected regions.
         for pattern, tag in [
             (NUMBER_PATTERN, "number"),
             (DECL_PATTERN, "decl"),
@@ -338,12 +344,19 @@ class DndIDE:
             (BUILTIN_PATTERN, "builtin"),
             (STAT_NAME_PATTERN, "statname"),
             (KIND_PATTERN, "kind"),
-            (STRING_PATTERN, "string"),
         ]:
             for m in re.finditer(pattern, text):
+                if is_protected(m):
+                    continue
                 start = f"1.0+{m.start()}c"
                 end = f"1.0+{m.end()}c"
                 self.editor.tag_add(tag, start, end)
+
+        # Scrolls and comments are painted last and explicitly protected.
+        for m in re.finditer(STRING_PATTERN, text):
+            start = f"1.0+{m.start()}c"
+            end = f"1.0+{m.end()}c"
+            self.editor.tag_add("string", start, end)
 
         for m in re.finditer(COMMENT_PATTERN, text, re.MULTILINE):
             start = f"1.0+{m.start()}c"
