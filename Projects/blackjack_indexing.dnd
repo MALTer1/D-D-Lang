@@ -1,0 +1,6 @@
+ability hand = ["10", "7", "A"]
+ability index = 0
+
+while (index < len(hand)):
+    narrate(hand[index])
+    ability index = index + 1
