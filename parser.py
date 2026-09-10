@@ -73,15 +73,21 @@ class Parser:
             return {"type": "Assignment", "target": target, "value": {"type": "BinaryOp", "op": "+", "left": target, "right": rhs}}
         self.pos = start; expr = self.parse_expr(); self.expect("NEWLINE"); return {"type": "ExprStatement", "expr": expr}
 
+    def _index_field(self, index):
+        if index.get("type") == "Identifier": return f"member_{index['name']}"
+        if index.get("type") == "NumberLiteral": return f"member_{index['value']}"
+        raise SyntaxError("The DM currently needs a number or an ability name inside list brackets.")
+
     def parse_postfix_target(self):
         name = self.expect("ID").value; node = {"type": "Identifier", "name": name}
-        while self.check("."):
-            self.advance(); field = self.expect("ID").value; node = {"type": "FieldAccess", "obj": node, "field": field}
-        while self.check("["):
-            self.advance()
-            index = self.parse_expr()
-            self.expect("]")
-            node = {"type": "IndexAccess", "obj": node, "index": index}
+        while True:
+            if self.check("."):
+                self.advance(); field = self.expect("ID").value; node = {"type": "FieldAccess", "obj": node, "field": field}
+            elif self.check("["):
+                self.advance(); index = self.parse_expr(); self.expect("]")
+                node = {"type": "FieldAccess", "obj": node, "field": self._index_field(index)}
+            else:
+                break
         return node
 
     def parse_narrate(self):
@@ -242,10 +248,8 @@ class Parser:
                 if field == "sway" and self.check("("): node = self.parse_sway_call(instance=node); continue
                 node = {"type": "FieldAccess", "obj": node, "field": field}
             elif self.check("["):
-                self.advance()
-                index = self.parse_expr()
-                self.expect("]")
-                node = {"type": "IndexAccess", "obj": node, "index": index}
+                self.advance(); index = self.parse_expr(); self.expect("]")
+                node = {"type": "FieldAccess", "obj": node, "field": self._index_field(index)}
             elif self.check("("):
                 self.advance(); args = []
                 if not self.check(")"):
