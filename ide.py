@@ -248,6 +248,11 @@ class DndIDE:
         self.editor.tag_configure("number", foreground="#B5CEA8")
         self.editor.tag_configure("comment", foreground="#6A9955")
 
+        # Tkinter tag priority is independent of tag_add order. Numbers are a
+        # separate tag from quoted Scrolls, so explicitly put Scrolls above
+        # numbers to keep digits such as "10" in Scroll color.
+        self.editor.tag_raise("string", "number")
+
     ALL_TAGS = ("decl", "control", "io", "bool", "builtin", "statname",
                 "kind", "string", "number", "comment")
 
