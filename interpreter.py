@@ -78,7 +78,10 @@ class Interpreter:
         kind=stmt["type"]
         if kind in ("AbilityDecl","PouchDecl"):env.declare(stmt["name"],self.eval_expr(stmt["value"],env))
         elif kind=="VaultDecl":env.declare(stmt["name"],VaultHandle(to_scroll(self.eval_expr(stmt["path"],env))))
-        elif kind=="Assignment":self.assign_target(stmt["target"],self.eval_expr(stmt["value"],env),env)
+        elif kind=="Assignment":
+            value=self.eval_expr(stmt["value"],env); op=stmt.get("operator","=")
+            if op=="=": self.assign_target(stmt["target"],value,env)
+            else:self.assign_target(stmt["target"],self.apply_binary_values(self.eval_expr(stmt["target"],env),value,op[0]),env)
         elif kind=="Narrate":self.output_func(to_scroll(self.eval_expr(stmt["value"],env)))
         elif kind=="Attempt":
             for c in stmt["clauses"]:
@@ -141,6 +144,7 @@ class Interpreter:
         if k=="StringLiteral":return n["value"]
         if k=="BoolLiteral":return n["value"]
         if k=="NoneLiteral":return None
+        if k=="AddressLiteral":return n["value"]
         if k=="ListLiteral":return [self.eval_expr(x,env) for x in n["elements"]]
         if k=="PouchLiteral":return {self.eval_expr(a,env):self.eval_expr(b,env) for a,b in n["pairs"]}
         if k=="DiceLiteral":return n["max"]
@@ -169,8 +173,7 @@ class Interpreter:
             if i not in o:raise DMError(f"That pouch has no key '{to_scroll(i)}'.")
             return o[i]
         raise DMError("Only lists, Scrolls, and pouches can be indexed.")
-    def eval_binary(self,n,env):
-        a=self.eval_expr(n['left'],env);b=self.eval_expr(n['right'],env);o=n['op']
+    def apply_binary_values(self,a,b,o):
         if o=='+':return to_scroll(a)+to_scroll(b) if isinstance(a,str) or isinstance(b,str) else a+b
         if o=='-':return a-b
         if o=='*':return a*b
@@ -184,9 +187,15 @@ class Interpreter:
         if o=='>=':return a>=b
         if o=='<=':return a<=b
         raise DMError(f"Unknown operator '{o}'.")
+    def eval_binary(self,n,env):return self.apply_binary_values(self.eval_expr(n['left'],env),self.eval_expr(n['right'],env),n['op'])
     def call_quest(self,name,nodes,env):
-        if name not in self.quests:raise DMError(f"There's no quest called '{name}'.")
-        q=self.quests[name];args=[self.eval_expr(x,env) for x in nodes];qe=Environment()
+        actual_name=name
+        if actual_name not in self.quests:
+            try:candidate=env.get(name)
+            except DMError:candidate=None
+            if isinstance(candidate,str) and candidate in self.quests:actual_name=candidate
+        if actual_name not in self.quests:raise DMError(f"There's no quest called '{name}'.")
+        q=self.quests[actual_name];args=[self.eval_expr(x,env) for x in nodes];qe=Environment(parent=env)
         for p,a in zip(q['params'],args):qe.declare(p,a)
         self.caller_stack.append(env)
         try:self.exec_block(q['body'],qe);return None
@@ -252,29 +261,14 @@ class Interpreter:
             args[0].closed=True;return None
         if name=='exists':return os.path.exists(self._vault_path(args[0]))
         if name=='remove':
-            try:os.remove(self._vault_path(args[0]))
-            except FileNotFoundError:pass
-            return None
+            p=self._vault_path(args[0])
+            try:os.remove(p);return True
+            except FileNotFoundError:return False
         if name=='forget':
             if not nodes or nodes[0].get('type')!='Identifier':raise DMError("'forget' expects a variable name.")
-            if not env.forget(nodes[0]['name']):raise DMError(f"'{nodes[0]['name']}' doesn't exist.")
-            return None
+            return env.forget(nodes[0]['name'])
         if name=='memory':return len(repr(self.global_env.vars).encode('utf-8'))
         raise DMError(f"There's no built-in called '{name}'.")
-    def run_functional(self,name,nodes,args,env):
-        if len(nodes)!=2 and not (name=='reduce' and len(nodes)==3):raise DMError(f"'{name}' needs a list and a quest.")
-        values=args[0]
-        op=nodes[1];qname=op.get('name') if op.get('type')=='Identifier' else op.get('value') if op.get('type')=='StringLiteral' else None
-        if qname not in self.quests:raise DMError(f"There's no quest called '{qname}'.")
-        if not isinstance(values,list):raise DMError(f"'{name}' needs a list as its first value.")
-        if name=='map':return [self.call_quest(qname,[value_to_literal_node(x)],env) for x in values]
-        if name=='filter':return [x for x in values if self.call_quest(qname,[value_to_literal_node(x)],env)]
-        if len(args)==2:
-            if not values:raise DMError("'reduce' can't reduce an empty list without a starting value.")
-            acc=values[0];items=values[1:]
-        else:acc=args[1];items=values
-        for item in items:acc=self.call_quest(qname,[value_to_literal_node(acc),value_to_literal_node(item)],env)
-        return acc
     def _vault_path(self,v):
         if isinstance(v,VaultHandle):v.check();return v.path
         if isinstance(v,str):return v
@@ -383,10 +377,38 @@ class Interpreter:
     def eval_force(self,n,env):return apply_math_symbol(self.resolve_stat_value('STR',n['mode'],n['instance'],env),n['symbol'],self.eval_expr(n['value'],env))
     def eval_sway(self,n,env):
         if not self.block_stack:raise DMError("sway can't be used outside of a block.")
-        f=self.block_stack[-1];ss=f['statements'];a=int(self.eval_expr(n['address'],env))
-        if a<0 or a>=len(ss):raise DMError(f"There's no line at address {a} to move.")
-        if a<=f['index']:raise DMError("You can't move a line that's already happened.")
-        d=max(f['index']+1,min(a+int(self.resolve_shift(n['shift'],n['instance'],env)),len(ss)-1));x=ss.pop(a);ss.insert(d,x)
+        frame=self.block_stack[-1]
+        raw=self.eval_expr(n['address'],env)
+        target=self.find_sway_target(frame,raw)
+        if target is None:raise DMError(f"There's no line at address {raw} to move.")
+        owner,index,ancestor=target
+        if owner is frame['statements']:
+            if index<=frame['index']:raise DMError("You can't move a line that's already happened.")
+            minimum=frame['index']+1
+        else:
+            if ancestor<=frame['index']:raise DMError("You can't move a line that's already happened.")
+            minimum=0
+        dest=max(minimum,min(index+int(self.resolve_shift(n['shift'],n['instance'],env)),len(owner)-1));x=owner.pop(index);owner.insert(dest,x)
+    def find_sway_target(self,frame,address):
+        if isinstance(address,(int,float)) and not isinstance(address,bool) and float(address).is_integer():
+            i=int(address);s=frame['statements'];return {'owner':s,'index':i,'ancestor_index':i} if 0<=i<len(s) else None
+        text=str(address)
+        if '.' not in text:return None
+        major_text,minor_text=text.split('.',1)
+        if not major_text.isdigit() or not minor_text.isdigit():return None
+        major,minor=int(major_text),int(minor_text);s=frame['statements']
+        if not 0<=major<len(s):return None
+        for block in self._statement_blocks(s[major]):
+            if 0<=minor<len(block):return {'owner':block,'index':minor,'ancestor_index':major}
+        return None
+    def _statement_blocks(self,stmt):
+        blocks=[];k=stmt.get('type')
+        if k in ('While','Adventure','ForParty','QuestDef','HomebrewDef','Submit') and isinstance(stmt.get('body'),list):blocks.append(stmt['body'])
+        if k=='Attempt':
+            for c in stmt.get('clauses',[]):
+                if isinstance(c.get('body'),list):blocks.append(c['body'])
+            if isinstance(stmt.get('fail_body'),list):blocks.append(stmt['fail_body'])
+        return blocks
     def resolve_shift(self,n,i,env):return n['value'] if n['type']=='ShiftLiteral' else self.resolve_stat_value(n['stat'] or 'CHA',n['mode'],i,env)
     def resolve_stat_value(self,s,m,i,env):return (self.eval_expr(i,env)['STATS'] if i is not None else self.get_global_stats())[s][m]
     def eval_solve(self,n,env):
