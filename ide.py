@@ -17,16 +17,14 @@ BOOL_WORDS={"honor","lie"}
 BUILTIN_WORDS={"force","sway","endure","perceive","solve","roll","max","min","len","num","str","bool","type","list","pouch","sum","abs","round","sorted","reversed","reverse","any","all","zip","enumerate","append","push","pop","map","filter","reduce","contains","index","read","write","close","seal","exists","remove","forget","memory","lower","upper","trim","clean","title","starts","ends","empty","words","split","join","find","count","replace"}
 STAT_WORDS={"STR","DEX","CON","INT","WIS","CHA"}
 KIND_WORDS={"character","item","monster","spell"}
-HOVER_DOCS={
-    "ability":"Declares a normal value.","pouch":"Declares named key-value data.","vault":"Declares a file vault.","pass":"Does nothing. Useful as a placeholder.","raise":"Raises a DM error on purpose.","finally":"Runs after submit/consider.","submit":"Runs code that might fail.","consider":"Handles an error after submit.","issue":"Names the error kind.","none":"The empty value. Its language type is NoneType.","party":"Creates a D&D Lang sequence/range.","type":"Returns a D&D Lang type name.","bool":"Converts a value to honor/lie.","list":"Converts a value to a list.","sum":"Adds a sequence or supplied numbers.","sorted":"Returns a sorted copy.","reversed":"Returns a reversed copy.","reverse":"Reverses a list in place.","enumerate":"Returns pouches containing index and value.","zip":"Combines lists by matching positions.","map":"Applies a quest to each list item.","filter":"Keeps list items whose quest result is honor.","reduce":"Combines a list with a two-argument quest.","read":"Reads text from a vault or path.","write":"Writes text to a vault.","close":"Seals a vault.","append":"Adds to a list or vault.","forget":"Removes a named variable from scope.","memory":"Reports a small runtime memory estimate.","replace":"Scroll method: replaces matching text.","find":"Scroll method: finds text.","count":"Scroll method: counts matching text.","contains":"Checks whether a collection contains a value.","len":"Returns length.","num":"Converts to a number.","str":"Converts to a Scroll.","summon":"Creates a homebrew instance.","homebrew":"Defines a custom D&D type.","quest":"Defines a function-like quest.","embark":"Calls a quest.","reward":"Returns a value from a quest.","init":"Pulls a caller variable into an isolated quest.","narrate":"Prints output.","player":"Gets player input.","attempt":"Conditional block.","or_attempt":"Additional conditional branch.","fail":"Fallback branch.","adventure":"Repeats or iterates a block.","while":"Loops while a condition is honor.","for":"Starts a party loop.","quit":"Stops the nearest loop.","continue":"Skips the current loop iteration.","force":"Moves execution forward.","sway":"Reorders unexecuted code. Supports addresses such as 3 or 3.1."}
+HOVER_DOCS={"ability":"Declares a normal value.","pouch":"Declares named key-value data.","vault":"Declares a file vault.","pass":"Does nothing. Useful as a placeholder.","raise":"Raises a DM error on purpose.","finally":"Runs after submit/consider.","submit":"Runs code that might fail.","consider":"Handles an error after submit.","issue":"Names the error kind.","none":"The empty value. Its language type is NoneType.","party":"Creates a D&D Lang sequence/range.","type":"Returns a D&D Lang type name.","bool":"Converts a value to honor/lie.","list":"Converts a value to a list.","sum":"Adds a sequence or supplied numbers.","sorted":"Returns a sorted copy.","reversed":"Returns a reversed copy.","reverse":"Reverses a list in place.","enumerate":"Returns pouches containing index and value.","zip":"Combines lists by matching positions.","map":"Applies a quest to each list item.","filter":"Keeps list items whose quest result is honor.","reduce":"Combines a list with a two-argument quest.","read":"Reads text from a vault or path.","write":"Writes text to a vault.","close":"Seals a vault.","append":"Adds to a list or vault.","forget":"Removes a named variable from scope.","memory":"Reports a small runtime memory estimate.","replace":"Scroll method: replaces matching text.","find":"Scroll method: finds text.","count":"Scroll method: counts matching text.","contains":"Checks whether a collection contains a value.","len":"Returns length.","num":"Converts to a number.","str":"Converts to a Scroll.","summon":"Creates a homebrew instance.","homebrew":"Defines a custom D&D type.","quest":"Defines a function-like quest.","embark":"Calls a quest.","reward":"Returns a value from a quest.","init":"Pulls a caller variable into an isolated quest.","narrate":"Prints output.","player":"Gets player input.","attempt":"Conditional block.","or_attempt":"Additional conditional branch.","fail":"Fallback branch.","adventure":"Repeats or iterates a block.","while":"Loops while a condition is honor.","for":"Starts a party loop.","quit":"Stops the nearest loop.","continue":"Skips the current loop iteration.","force":"Moves execution forward.","sway":"Reorders unexecuted code. Supports addresses such as 3 or 3.1."}
 
 THEMES={
     "D&D Dark":{"bg":"#101318","panel":"#171b22","panel2":"#1d232d","editor":"#11151b","gutter":"#171b22","text":"#d9e1ea","muted":"#7f8b99","accent":"#d6a85f","accent2":"#8f6f3f","console":"#0b0f13","console_text":"#8fe388","select":"#334155","current":"#1a222d","button":"#202936","button_hover":"#2a3545"},
     "Midnight":{"bg":"#090b14","panel":"#111426","panel2":"#171b31","editor":"#0b0e1a","gutter":"#111426","text":"#dfe5ff","muted":"#737b9b","accent":"#8c7cff","accent2":"#5b52aa","console":"#080a12","console_text":"#7ee7ff","select":"#30365c","current":"#151a2d","button":"#1b2140","button_hover":"#28305a"},
     "Forest":{"bg":"#0d1511","panel":"#132019","panel2":"#1a2a21","editor":"#0d1712","gutter":"#132019","text":"#dce9df","muted":"#78907e","accent":"#7bc47f","accent2":"#4d8053","console":"#09100c","console_text":"#9be7a0","select":"#294335","current":"#16251b","button":"#1a2c21","button_hover":"#254031"},
     "Ember":{"bg":"#18100f","panel":"#241614","panel2":"#2e1c19","editor":"#170f0e","gutter":"#241614","text":"#f2e1da","muted":"#a48479","accent":"#ff9a62","accent2":"#a65b3b","console":"#100a09","console_text":"#ffc078","select":"#513026","current":"#281815","button":"#34201a","button_hover":"#4a2b21"},
-    "Light":{"bg":"#eef1f5","panel":"#ffffff","panel2":"#e4e8ee","editor":"#fbfcfe","gutter":"#e9edf2","text":"#253041","muted":"#6d7786","accent":"#9a6b18","accent2":"#c59a45","console":"#20252c","console_text":"#a9f0a0","select":"#cbd7e8","current":"#edf2f8","button":"#e2e7ee","button_hover":"#d5dde8"}
-}
+    "Light":{"bg":"#eef1f5","panel":"#ffffff","panel2":"#e4e8ee","editor":"#fbfcfe","gutter":"#e9edf2","text":"#253041","muted":"#6d7786","accent":"#9a6b18","accent2":"#c59a45","console":"#20252c","console_text":"#a9f0a0","select":"#cbd7e8","current":"#edf2f8","button":"#e2e7ee","button_hover":"#d5dde8"}}
 DEFAULTS={"theme":"D&D Dark","font":"Consolas","font_size":12,"console_size":11,"tab_size":4,"line_numbers":True,"addresses":True,"word_wrap":False,"minimap":True,"current_line":True,"bold_keywords":False,"cursor":"#ffffff","accent_override":None}
 
 def compute_line_addresses(text):
@@ -47,6 +45,8 @@ class DndIDE:
         try:
             with open(self._settings_path(),"r",encoding="utf-8") as f:self.settings.update(json.load(f))
         except Exception:pass
+        for key,value in DEFAULTS.items():
+            self.settings.setdefault(key,value)
         if self.settings.get("theme") not in THEMES:self.settings["theme"]="D&D Dark"
     def _save_settings(self):
         try:
@@ -74,168 +74,4 @@ class DndIDE:
         self.editor.tag_configure("current_line",background=C["current"])
     ALL_TAGS=("decl","control","io","bool","builtin","statname","kind","string","number","comment")
     def _apply_theme(self):
-        C=self.C;self.root.configure(bg=C["bg"]);self.top.configure(bg=C["panel"]);self.sidebar.configure(bg=C["panel"]);self.brand.configure(bg=C["panel"],fg=C["accent"]);self.file_label.configure(bg=C["panel"],fg=C["muted"]);self.status_mode.configure(bg=C["panel"],fg=C["accent"]);self.settings_button.configure(bg=C["panel"],fg=C["muted"],activebackground=C["button_hover"]);self.run_button.configure(bg=C["accent"],fg=C["editor"],activebackground=C["accent2"]);self.side_file.configure(bg=C["panel2"],fg=C["text"]);self.side_hint.configure(bg=C["panel"],fg=C["muted"]);self.linenumbers.configure(bg=C["gutter"],fg=C["muted"]);self.editor.configure(bg=C["editor"],fg=C["text"],insertbackground=self.settings["cursor"],selectbackground=C["select"],selectforeground=C["text"]);self.minimap.configure(bg=C["panel2"],fg=C["muted"]);self.console.configure(bg=C["console"],fg=C["console_text"],insertbackground=C["console_text"]);self.statusbar.configure(bg=C["panel2"]);self.cursor_label.configure(bg=C["panel2"],fg=C["muted"]);self.status_right.configure(bg=C["panel2"],fg=C["muted"]);self.console_clear.configure(bg=C["button"],fg=C["muted"],activebackground=C["button_hover"]);self._configure_tags();self._update_line_numbers();self._update_minimap()
-    def _update_fonts(self):self.editor.configure(font=(self.settings["font"],self.settings["font_size"]));self.linenumbers.configure(font=(self.settings["font"],self.settings["font_size"]));self.console.configure(font=(self.settings["font"],self.settings["console_size"]));self._configure_tags();self._highlight()
-    def _on_editor_yview(self,a,b):self.linenumbers.yview_moveto(float(a));self.minimap.yview_moveto(float(a))
-    def _update_line_numbers(self,text=None):
-        text=self.editor.get("1.0","end-1c") if text is None else text;addrs=compute_line_addresses(text);lines=[(a if self.settings["addresses"] else str(i)).rjust(5) for i,a in enumerate(addrs,1)];self.linenumbers.config(state="normal");self.linenumbers.delete("1.0","end");self.linenumbers.insert("1.0","\n".join(lines));self.linenumbers.config(state="disabled");self.status_right.config(text=f"D&D Lang  •  UTF-8  •  Spaces: {self.settings['tab_size']}");self.linenumbers.pack_forget();self.linenumbers.pack(side=tk.LEFT,fill=tk.Y) if self.settings["line_numbers"] else None
-    def _update_minimap(self):
-        text=self.editor.get("1.0","end-1c");self.minimap.config(state="normal");self.minimap.delete("1.0","end");self.minimap.insert("1.0",text);self.minimap.config(state="disabled");self.minimap.pack_forget();self.minimap.pack(side=tk.RIGHT,fill=tk.Y) if self.settings["minimap"] else None
-    def _highlight(self,event=None):
-        if self._highlight_job:
-            try:self.root.after_cancel(self._highlight_job)
-            except Exception:pass
-        self._highlight_job=self.root.after(20,self._do_highlight)
-    def _do_highlight(self):
-        self._highlight_job=None;text=self.editor.get("1.0","end-1c")
-        for tag in self.ALL_TAGS:self.editor.tag_remove(tag,"1.0","end")
-        i=0;n=len(text)
-        while i<n:
-            if text[i]=='"':
-                a=i;i+=1;esc=False
-                while i<n:
-                    ch=text[i]
-                    if esc:esc=False
-                    elif ch=='\\':esc=True
-                    elif ch=='"':i+=1;break
-                    i+=1
-                self._tag("string",a,i);continue
-            if i+1<n and text[i:i+2]=='--':
-                a=i;i+=2;close=text.find('--',i);nl=text.find('\n',i)
-                if close==-1 or (nl!=-1 and nl<close):i=n if nl==-1 else nl
-                else:i=close+2
-                self._tag("comment",a,i);continue
-            ch=text[i]
-            if ch.isalpha() or ch=='_':
-                a=i;i+=1
-                while i<n and (text[i].isalnum() or text[i]=='_'):i+=1
-                w=text[a:i];tag="decl" if w in DECL_WORDS else "control" if w in CONTROL_WORDS else "io" if w in IO_WORDS else "bool" if w in BOOL_WORDS else "builtin" if w in BUILTIN_WORDS or w.startswith("member_") else "statname" if w in STAT_WORDS else "kind" if w in KIND_WORDS else None
-                if tag:self._tag(tag,a,i)
-                continue
-            if ch.isdigit():
-                a=i;i+=1
-                while i<n and (text[i].isdigit() or text[i]=='.'):i+=1
-                self._tag("number",a,i);continue
-            i+=1
-        self._update_line_numbers(text);self._update_minimap();self._update_cursor();self._update_current_line()
-    def _tag(self,tag,a,b):self.editor.tag_add(tag,f"1.0+{a}c",f"1.0+{b}c")
-    def _update_current_line(self):
-        self.editor.tag_remove("current_line","1.0","end")
-        if self.settings.get("current_line"):
-            line=self.editor.index(tk.INSERT).split('.')[0];self.editor.tag_add("current_line",f"{line}.0",f"{line}.0 lineend+1c");self.editor.tag_lower("current_line")
-    def _update_cursor(self,event=None):
-        try:line,col=self.editor.index(tk.INSERT).split('.');self.cursor_label.config(text=f"Ln {line}, Col {int(col)+1}");self._update_current_line()
-        except Exception:pass
-    def _on_key_release(self,event=None):self._highlight();self._update_cursor()
-    def _on_tab(self,event=None):self.editor.insert(tk.INSERT," "*int(self.settings["tab_size"]));return "break"
-    def _on_shift_tab(self,event=None):
-        line=self.editor.index(tk.INSERT).split('.')[0];text=self.editor.get(f"{line}.0",f"{line}.0 lineend");spaces=min(len(text)-len(text.lstrip(' ')),int(self.settings["tab_size"]));
-        if spaces:self.editor.delete(f"{line}.0",f"{line}.{spaces}")
-        return "break"
-    def _on_return(self,event):
-        cur=self.editor.index(tk.INSERT);ls=cur.split('.')[0]+'.0';line=self.editor.get(ls,cur);ws=re.match(r'[ \t]*',line).group();extra=' '*int(self.settings["tab_size"]) if line.rstrip().endswith(':') else '';self.editor.insert(tk.INSERT,"\n"+ws+extra);return "break"
-    def _pair(self,a,b):self.editor.insert(tk.INSERT,a+b);self.editor.mark_set(tk.INSERT,f"{tk.INSERT}-1c");return "break"
-    def _close(self,ch):
-        i=self.editor.index(tk.INSERT)
-        if self.editor.get(i,f"{i}+1c")==ch:self.editor.mark_set(tk.INSERT,f"{i}+1c");return "break"
-    def _open_paren(self,e):return self._pair('(',')')
-    def _close_paren(self,e):return self._close(')')
-    def _open_bracket(self,e):return self._pair('[',']')
-    def _close_bracket(self,e):return self._close(']')
-    def _open_brace(self,e):return self._pair('{','}')
-    def _close_brace(self,e):return self._close('}')
-    def _quote(self,e):
-        i=self.editor.index(tk.INSERT)
-        if self.editor.get(i,f"{i}+1c")=="\"":self.editor.mark_set(tk.INSERT,f"{i}+1c");return "break"
-        return self._pair('"','"')
-    def _word_at(self,idx):
-        ln=idx.split('.')[0];line=self.editor.get(f"{ln}.0",f"{ln}.0 lineend");c=int(idx.split('.')[1]);a=c
-        while a>0 and (line[a-1].isalnum() or line[a-1]=='_'):a-=1
-        b=c
-        while b<len(line) and (line[b].isalnum() or line[b]=='_'):b+=1
-        return line[a:b]
-    def _on_hover(self,e):
-        w=self._word_at(self.editor.index(f"@{e.x},{e.y}"))
-        if w==self._last_hover_word:return
-        self._last_hover_word=w
-        if w in HOVER_DOCS:self._show_tooltip(e.x_root,e.y_root,w,HOVER_DOCS[w])
-        else:self._hide_tooltip()
-    def _show_tooltip(self,x,y,w,t):
-        self._hide_tooltip();self.tooltip=tk.Toplevel(self.root);self.tooltip.wm_overrideredirect(True);self.tooltip.wm_geometry(f"+{x+14}+{y+16}");C=self.C;f=tk.Frame(self.tooltip,bg=C["panel2"],relief="solid",bd=1);f.pack();tk.Label(f,text=w,bg=C["panel2"],fg=C["accent"],font=("Segoe UI",9,"bold")).pack(fill="x",padx=8,pady=(6,1));tk.Label(f,text=t,bg=C["panel2"],fg=C["text"],font=("Segoe UI",9),wraplength=420,justify="left").pack(fill="x",padx=8,pady=(0,7))
-    def _hide_tooltip(self):
-        if self.tooltip:
-            try:self.tooltip.destroy()
-            except Exception:pass
-        self.tooltip=None;self._last_hover_word=None
-    def new_file(self):self.editor.delete("1.0","end");self.current_path=None;self._set_file_title("untitled.dnd");self._highlight()
-    def _set_file_title(self,name):self.root.title(f"D&D Lang IDE — {name}");self.file_label.config(text=name);self.side_file.config(text=f"▸  {name}")
-    def open_file(self):
-        p=filedialog.askopenfilename(filetypes=[("D&D files","*.dnd"),("All files","*.*")])
-        if not p:return
-        try:
-            with open(p,"r",encoding="utf-8") as f:c=f.read()
-            self.editor.delete("1.0","end");self.editor.insert("1.0",c);self.current_path=p;self._set_file_title(os.path.basename(p));self._highlight()
-        except Exception as e:messagebox.showerror("Open failed",str(e),parent=self.root)
-    def save_file(self):
-        if self.current_path is None:return self.save_file_as()
-        try:
-            with open(self.current_path,"w",encoding="utf-8") as f:f.write(self.editor.get("1.0","end-1c"))
-            self.status_mode.config(text="SAVED")
-        except Exception as e:messagebox.showerror("Save failed",str(e),parent=self.root)
-    def save_file_as(self):
-        p=filedialog.asksaveasfilename(defaultextension=".dnd",filetypes=[("D&D files","*.dnd"),("All files","*.*")])
-        if p:self.current_path=p;self._set_file_title(os.path.basename(p));self.save_file()
-    def run_code(self):
-        s=self.editor.get("1.0","end-1c");self._clear_console();self.run_button.config(state="disabled",text="⏳  Running");self.status_mode.config(text="RUNNING",fg=self.C["accent"]);threading.Thread(target=self._run_in_thread,args=(s,),daemon=True).start()
-    def _run_in_thread(self,s):
-        try:Interpreter(output_func=self._queue_output,input_func=self._ask_input).run(parse(tokenize(s)))
-        except (SyntaxError,DMError,ValueError) as e:self._queue_output(f"DM: {e}")
-        except Exception as e:self._queue_output(f"DM: something went very wrong ({e})")
-        finally:self.output_queue.put(("__DONE__",None))
-    def _queue_output(self,t):self.output_queue.put(("line",t))
-    def _ask_input(self,prompt):
-        def show():
-            v=simpledialog.askstring("Player Input",prompt,parent=self.root);self.input_result_queue.put(v if v is not None else "")
-        self.root.after(0,show);return self.input_result_queue.get()
-    def _poll_output_queue(self):
-        try:
-            while True:
-                k,p=self.output_queue.get_nowait()
-                if k=="line":self._append_console(p+"\n")
-                elif k=="__DONE__":self.run_button.config(state="normal",text="▶  Run");self.status_mode.config(text="READY",fg=self.C["accent"])
-        except queue.Empty:pass
-        self.root.after(60,self._poll_output_queue)
-    def _append_console(self,t):self.console.config(state="normal");self.console.insert("end",t);self.console.see("end");self.console.config(state="disabled")
-    def _clear_console(self):self.console.config(state="normal");self.console.delete("1.0","end");self.console.config(state="disabled")
-    def toggle_minimap(self):self.settings["minimap"]=not self.settings["minimap"];self._save_settings();self._update_minimap()
-    def toggle_line_numbers(self):self.settings["line_numbers"]=not self.settings["line_numbers"];self._save_settings();self._update_line_numbers()
-    def toggle_addresses(self):self.settings["addresses"]=not self.settings["addresses"];self._save_settings();self._update_line_numbers()
-    def toggle_wrap(self):self.settings["word_wrap"]=not self.settings["word_wrap"];self.editor.configure(wrap="word" if self.settings["word_wrap"] else "none");self._save_settings()
-    def open_settings(self):
-        win=tk.Toplevel(self.root);win.title("D&D Lang IDE — Customization");win.geometry("590x600");win.minsize(540,520);win.transient(self.root);win.grab_set();C=self.C;win.configure(bg=C["bg"]);head=tk.Frame(win,bg=C["panel"],height=62);head.pack(fill=tk.X);head.pack_propagate(False);tk.Label(head,text="Customize your IDE",bg=C["panel"],fg=C["text"],font=("Segoe UI",15,"bold")).pack(side=tk.LEFT,padx=18);tk.Label(head,text="Theme • editor • layout • text",bg=C["panel"],fg=C["muted"],font=("Segoe UI",9)).pack(side=tk.LEFT,padx=4,pady=(5,0))
-        outer=tk.Frame(win,bg=C["bg"]);outer.pack(fill=tk.BOTH,expand=True,padx=18,pady=14);canvas=tk.Canvas(outer,bg=C["bg"],highlightthickness=0);scroll=tk.Scrollbar(outer,orient="vertical",command=canvas.yview);inner=tk.Frame(canvas,bg=C["bg"]);inner.bind("<Configure>",lambda e:canvas.configure(scrollregion=canvas.bbox("all")));canvas.create_window((0,0),window=inner,anchor="nw",width=530);canvas.configure(yscrollcommand=scroll.set);canvas.pack(side=tk.LEFT,fill=tk.BOTH,expand=True);scroll.pack(side=tk.RIGHT,fill=tk.Y)
-        def section(title):tk.Label(inner,text=title,bg=C["bg"],fg=C["accent"],font=("Segoe UI",9,"bold"),anchor="w").pack(fill=tk.X,pady=(10,6))
-        def row(label,widget):
-            fr=tk.Frame(inner,bg=C["panel"]);fr.pack(fill=tk.X,pady=2);tk.Label(fr,text=label,bg=C["panel"],fg=C["text"],font=("Segoe UI",9),anchor="w").pack(side=tk.LEFT,padx=10,pady=8);widget(fr).pack(side=tk.RIGHT,padx=8,pady=5)
-        section("APPEARANCE");theme_var=tk.StringVar(value=self.settings["theme"]);row("Theme",lambda p:tk.OptionMenu(p,theme_var,*THEMES.keys()));accent=tk.StringVar(value=self.C["accent"])
-        def choose_accent():
-            col=colorchooser.askcolor(color=accent.get(),parent=win)[1]
-            if col:accent.set(col)
-        row("Accent color",lambda p:tk.Button(p,text="Choose color",command=choose_accent,relief="flat",bd=0,padx=10))
-        section("EDITOR");font_var=tk.StringVar(value=self.settings["font"]);row("Font",lambda p:tk.OptionMenu(p,font_var,*["Consolas","Courier New","Lucida Console","TkFixedFont"]));size_var=tk.IntVar(value=int(self.settings["font_size"]));row("Editor text size",lambda p:tk.Spinbox(p,from_=9,to=28,textvariable=size_var,width=5));console_var=tk.IntVar(value=int(self.settings["console_size"]));row("Console text size",lambda p:tk.Spinbox(p,from_=8,to=24,textvariable=console_var,width=5));tab_var=tk.IntVar(value=int(self.settings["tab_size"]));row("Indent spaces",lambda p:tk.Spinbox(p,from_=2,to=8,textvariable=tab_var,width=5))
-        section("VISUAL DETAILS");vars_={k:tk.BooleanVar(value=bool(self.settings[k])) for k in ("line_numbers","addresses","word_wrap","minimap","current_line","bold_keywords")};labels={"line_numbers":"Line numbers","addresses":"D&D major.minor addresses","word_wrap":"Word wrap","minimap":"Mini-map","current_line":"Highlight current line","bold_keywords":"Bold syntax keywords"}
-        for k in vars_:row(labels[k],lambda p,k=k:tk.Checkbutton(p,variable=vars_[k],bg=C["panel"],activebackground=C["panel"],selectcolor=C["panel2"]))
-        section("CURSOR");cursor_var=tk.StringVar(value=self.settings["cursor"])
-        def choose_cursor():
-            col=colorchooser.askcolor(color=cursor_var.get(),parent=win)[1]
-            if col:cursor_var.set(col)
-        row("Cursor color",lambda p:tk.Button(p,textvariable=cursor_var,command=choose_cursor,relief="flat",bd=0,padx=10))
-        foot=tk.Frame(win,bg=C["panel"],height=54);foot.pack(side=tk.BOTTOM,fill=tk.X);foot.pack_propagate(False)
-        def reset():self.settings=dict(DEFAULTS);self._save_settings();win.destroy();self._apply_theme();self._update_fonts();self.editor.configure(wrap="none")
-        def apply():
-            self.settings.update({"theme":theme_var.get(),"font":font_var.get(),"font_size":int(size_var.get()),"console_size":int(console_var.get()),"tab_size":int(tab_var.get()),"accent_override":accent.get(),"cursor":cursor_var.get()});self.settings.update({k:v.get() for k,v in vars_.items()});self._save_settings();self._apply_theme();self._update_fonts();self.editor.configure(wrap="word" if self.settings["word_wrap"] else "none");win.destroy()
-        tk.Button(foot,text="Reset defaults",command=reset,relief="flat",bd=0,padx=12).pack(side=tk.LEFT,padx=12,pady=10);tk.Button(foot,text="Cancel",command=win.destroy,relief="flat",bd=0,padx=12).pack(side=tk.RIGHT,padx=4,pady=10);tk.Button(foot,text="Apply",command=apply,bg=C["accent"],fg=C["editor"],relief="flat",bd=0,padx=18).pack(side=tk.RIGHT,padx=10,pady=10)
-
-def main():
-    root=tk.Tk();DndIDE(root);root.mainloop()
-if __name__=="__main__":main()
+        C=self.C;self.root.configure(bg=C["bg"]);self.top.configure(bg=C["panel"]);self.sidebar.configure(bg=C["panel"]);self.brand.configure(bg=C["panel"],fg=C["accent"]);self.file_label.configure(bg=C["panel"],fg=C["muted"]);self.status_mode.configure(bg=C["panel"],fg=C["accent"]);self.settings_button.configure(bg=C["panel"],fg=C["muted"],activebackground=C["button_hover"]);self.run_button.configure(bg=C["accent"],fg=C["editor"],activebackground=C["accent2"]);self.side_file.configure(bg=C["panel2"],fg=C["text"]);self.side_hint.configure(bg=C["panel"],fg=C["muted"]);self.linenumbers.configure(bg=C["gutter"],fg=C["muted"]);self.editor.configure(bg=C["editor"],fg=C["text"],insertbackground=self.settings.get("cursor",DEFAULTS["cursor"]),selectbackground=C["select"],selectforeground=C["text"]);self.minimap.configure(bg=C["panel2"],fg=C["muted"]);self.console.configure(bg=C["console"],fg=C["console_text"],insertbackground=C["console_text"]);self.statusbar.configure(bg=C["panel2"]);self.cursor_label.configure(bg=C["panel2"],fg=C["muted"]);self.status_right.configure(bg=C["panel2"],fg=C["muted"]);self.console_clear.configure(bg=C["button"],fg=C["muted"],activebackground=C["button_hover"]);self._configure_tags();self._update_line_numbers();self._update_minimap()
