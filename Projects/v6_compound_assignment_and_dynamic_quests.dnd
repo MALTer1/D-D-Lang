@@ -1,0 +1,21 @@
+-- Compound assignment and dynamic quest dispatch regression --
+
+ability hp = 20
+ability rooms = ["Goblin", "Slime"]
+
+quest Goblin():
+    hp -= 3
+
+quest Slime():
+    hp += 1
+
+quest crawl():
+    adventure enemy in rooms:
+        fight enemy()
+
+embark crawl()
+
+hp *= 2
+hp /= 2
+hp %= 5
+narrate hp
