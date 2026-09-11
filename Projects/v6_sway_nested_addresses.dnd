@@ -1,0 +1,8 @@
+-- D&D Lang v6 nested sway regression
+
+ability hero = 1
+hero.sway(2.1, -1)
+
+attempt (honor):
+    narrate "nested A"
+    narrate "nested B"
