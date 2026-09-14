@@ -182,6 +182,9 @@ class Interpreter:
         if o=='%':return a%b
         if o=='==':return a==b
         if o=='!=':return a!=b
+        # `none` is a missing/empty value. Ordering a missing value against a concrete value is a non-match.
+        if a is None or b is None:
+            if o in ('>','<','>=','<='):return False
         if o=='>':return a>b
         if o=='<':return a<b
         if o=='>=':return a>=b
@@ -253,179 +256,141 @@ class Interpreter:
             raise DMError(f"'{name}' needs a list or vault as its first value.")
         if name=='pop':
             if not isinstance(args[0],list) or not args[0]:raise DMError("'pop' needs a non-empty list.")
-            return args[0].pop(-1 if len(args)==1 else int(args[1]))
+            idx=-1 if len(args)==1 else int(args[1]);return args[0].pop(idx)
         if name=='read':return self._vault_read(args[0])
         if name=='write':self._vault_write(args[0],to_scroll(args[1]));return None
         if name in ('close','seal'):
             if not isinstance(args[0],VaultHandle):raise DMError("'close' needs a vault.")
             args[0].closed=True;return None
-        if name=='exists':return os.path.exists(self._vault_path(args[0]))
+        if name=='exists':return self._vault_path(args[0]) and os.path.exists(self._vault_path(args[0]))
         if name=='remove':
-            p=self._vault_path(args[0])
-            try:os.remove(p);return True
-            except FileNotFoundError:return False
+            path=self._vault_path(args[0])
+            try:os.remove(path)
+            except FileNotFoundError:pass
+            return None
         if name=='forget':
-            if not nodes or nodes[0].get('type')!='Identifier':raise DMError("'forget' expects a variable name.")
-            return env.forget(nodes[0]['name'])
+            if not nodes:raise DMError("'forget' needs a variable name.")
+            node=nodes[0]
+            if node.get('type')!='Identifier':raise DMError("'forget' expects a variable name, not its value.")
+            if not env.forget(node['name']):raise DMError(f"'{node['name']}' doesn't exist.")
+            return None
         if name=='memory':return len(repr(self.global_env.vars).encode('utf-8'))
         raise DMError(f"There's no built-in called '{name}'.")
-    def _vault_path(self,v):
-        if isinstance(v,VaultHandle):v.check();return v.path
-        if isinstance(v,str):return v
-        raise DMError("That isn't a vault or file path.")
-    def _vault_read(self,v):
-        p=self._vault_path(v)
-        try:
-            with open(p,'r',encoding='utf-8') as f:return f.read()
-        except FileNotFoundError:raise DMError(f"The vault '{p}' doesn't exist yet.")
-    def _vault_write(self,v,data):
-        p=self._vault_path(v)
-        try:
-            with open(p,'w',encoding='utf-8') as f:f.write(data)
-        except OSError as e:raise DMError(f"The DM couldn't write '{p}': {e}")
-    def _vault_append(self,v,data):
-        p=self._vault_path(v)
-        try:
-            with open(p,'a',encoding='utf-8') as f:f.write(data)
-        except OSError as e:raise DMError(f"The DM couldn't inscribe '{p}': {e}")
-    def resolve_party(self,nodes,env):
-        a=[self.eval_expr(x,env) for x in nodes]
-        if len(a)==1:
-            if isinstance(a[0],dict):return list(a[0].keys())
-            if isinstance(a[0],(list,str)):return list(a[0])
-            return list(range(int(a[0])))
-        if len(a)==2:return list(range(int(a[0]),int(a[1])))
-        raise DMError("party(...) takes 1 or 2 arguments.")
-    def exec_submit(self,stmt,env):
-        caught=False
-        try:self.exec_block(stmt['body'],Environment(parent=env))
-        except (QuitSignal,ContinueSignal,RewordSignal):raise
-        except Exception as e:
-            for c in stmt['considers']:
-                n=c['error_name'];match=n is None or (n=='ValueError' and isinstance(e,ValueError)) or (n=='DMError' and isinstance(e,DMError)) or (n=='OSError' and isinstance(e,OSError))
-                if match:self.exec_block(c['body'],Environment(parent=env));caught=True;break
-            if not caught:raise
-        finally:
-            if stmt.get('finally_body') is not None:self.exec_block(stmt['finally_body'],Environment(parent=env))
-    def define_homebrew(self,stmt,env):
-        k=stmt['kind']
-        if k not in SHAPE_RULES:raise DMError(f"'{k}' isn't a real homebrew kind.")
-        vals={n:self.eval_expr(e,env) for n,e in stmt['fields'].items()};filled=self.fill_shape(k,vals)
-        for n,v in filled.items():
-            if n not in stmt['fields']:stmt['fields'][n]=value_to_literal_node(v)
-        self.homebrews[stmt['name']]=stmt
-    def fill_shape(self,k,values):
-        r=SHAPE_RULES[k];counts={}
-        for v in values.values():t=classify_value(v);counts[t]=counts.get(t,0)+1
-        def total():return sum(min(c,r['max_per_type']) for c in counts.values())
-        cyc=['number','Scroll','list','honor/lie'];defs={'number':0,'Scroll':'','list':[],'honor/lie':False};i=0
-        while total()<r['min_total'] or len(counts)<r['min_types']:
-            missing=[t for t in cyc if t not in counts];t=missing[0] if len(counts)<r['min_types'] and missing else cyc[i%len(cyc)];values[f'_auto_{t.replace("/","_")}_{i}']=defs[t];counts[t]=counts.get(t,0)+1;i+=1
-        return values
-    def build_stats(self,se,ee,env):
-        out={}
-        for s in DEFAULT_STAT_NAMES:
-            n=self.eval_expr(se[s],env) if s in se else 10;out[s]={'number':n,'mod':math.floor((n-10)/2)}
-        for s,e in ee.items():n=self.eval_expr(e,env);out[s]={'number':n,'mod':math.floor((n-10)/2)}
-        return out
-    def get_global_stats(self):return self.global_stats if self.global_stats is not None else {s:{'number':10,'mod':0} for s in DEFAULT_STAT_NAMES}
-    def exec_summon(self,stmt,env):
-        t=self.homebrews.get(stmt['template'])
-        if t is None:raise DMError(f"There's no homebrew called '{stmt['template']}'.")
-        x={n:self.eval_expr(e,env) for n,e in t['fields'].items()};x['STATS']=self.build_stats(t['stats'],t['extra_stats'],env);x['__kind__']=t['kind'];env.declare(stmt['var_name'],x)
-    def eval_call_expr(self,n,env):
-        c=n['callee']
-        if c['type']=='FieldAccess' and c['field'] in ('mod','number') and c['obj']['type']=='FieldAccess' and c['obj']['field'] in STAT_FUNC_TO_STAT:
-            return self.run_stat_function(c['obj']['field'],self.eval_expr(c['obj']['obj'],env),c['field'],[self.eval_expr(a,env) for a in n['args']])
-        if c['type']=='Identifier' and c['name'] in ('endure','perceive'):return self.run_plain_stat_function(c['name'],[self.eval_expr(a,env) for a in n['args']])
-        if c['type']=='FieldAccess':
-            o=self.eval_expr(c['obj'],env)
-            if isinstance(o,str):return self.run_string_method(o,c['field'],[self.eval_expr(a,env) for a in n['args']])
-        raise DMError("That's not something you can call like that.")
-    def run_string_method(self,s,m,a):
-        x=to_scroll(a[0]) if a else None
-        if m=='lower':return s.lower()
-        if m=='upper':return s.upper()
-        if m=='trim':return s.strip()
-        if m=='clean':return ' '.join(s.split())
-        if m=='title':return s.title()
-        if m=='starts':return s.startswith(x)
-        if m=='ends':return s.endswith(x)
-        if m=='contains':return x in s
-        if m=='empty':return not s
-        if m=='words':return s.split()
-        if m=='split':return s.split(x) if a else s.split()
-        if m=='join':return s.join(to_scroll(v) for v in a[0])
-        if m=='find':return s.find(x)
-        if m=='count':return s.count(x)
-        if m=='replace':return s.replace(x,to_scroll(a[1]),int(a[2]) if len(a)>2 else -1)
-        raise DMError(f"Scrolls don't have a '{m}' method.")
+    def run_functional(self,name,arg_nodes,args,env):
+        if name in ('map','filter'):
+            if len(arg_nodes)!=2 or not isinstance(args[0],list):raise DMError(f"'{name}' needs a list and a quest.")
+            op_node=arg_nodes[1];op_name=op_node.get('name') if op_node.get('type')=='Identifier' else op_node.get('value') if op_node.get('type')=='StringLiteral' else None
+            if op_name not in self.quests:raise DMError(f"There's no quest called '{op_name}'.")
+            result=[]
+            for item in args[0]:
+                transformed=self.call_quest(op_name,[value_to_literal_node(item)],env)
+                if name=='map' or bool(transformed):result.append(transformed)
+            return result
+        if len(arg_nodes) not in (2,3) or not isinstance(args[0],list):raise DMError("'reduce' needs a list, a quest, and optionally a starting value.")
+        op_node=arg_nodes[1];op_name=op_node.get('name') if op_node.get('type')=='Identifier' else op_node.get('value') if op_node.get('type')=='StringLiteral' else None
+        if op_name not in self.quests:raise DMError(f"There's no reduce operation called '{op_name}'.")
+        values=args[0]
+        if len(args)==3:acc=args[2];start=0
+        else:
+            if not values:raise DMError("'reduce' can't reduce an empty list without a starting value.")
+            acc=values[0];start=1
+        for item in values[start:]:acc=self.call_quest(op_name,[value_to_literal_node(acc),value_to_literal_node(item)],env)
+        return acc
+    def run_string_method(self,s,method,args):
+        value=to_scroll(args[0]) if args else None
+        if method=='lower':return s.lower()
+        if method=='upper':return s.upper()
+        if method=='trim':return s.strip()
+        if method=='clean':return ' '.join(s.split())
+        if method=='title':return s.title()
+        if method=='starts':return s.startswith(value)
+        if method=='ends':return s.endswith(value)
+        if method=='contains':return value in s
+        if method=='empty':return len(s)==0
+        if method=='words':return s.split()
+        if method=='split':return s.split(value) if args else s.split()
+        if method=='join':return s.join(to_scroll(v) for v in args[0])
+        if method=='find':return s.find(value)
+        if method=='count':return s.count(value)
+        if method=='replace':return s.replace(value,to_scroll(args[1]),int(args[2]) if len(args)>2 else -1)
+        raise DMError(f"Scrolls don't have a '{method}' method.")
     def run_stat_function(self,sf,inst,mode,args):
         if not isinstance(inst,dict) or 'STATS' not in inst:raise DMError("That doesn't have STATS.")
-        v=inst['STATS'][STAT_FUNC_TO_STAT[sf]][mode]
+        stat=STAT_FUNC_TO_STAT[sf];value=inst['STATS'][stat][mode]
         if sf=='endure':
-            x,t=args;rate=v*(0.05 if mode=='mod' else 0.005)
-            for _ in range(int(t)):x=x-x*rate
+            x,t=args[0],args[1];rate=value*(0.05 if mode=='mod' else 0.005)
+            for _ in range(int(t)):x=x-(x*rate)
             return x
-        return sum(args[0])/len(args[0])+v
-    def run_plain_stat_function(self,n,a):
-        if n=='endure':
-            x,t,r=a
-            for _ in range(int(t)):x=x-x*(r/100)
+        if sf=='perceive':return sum(args[0])/len(args[0])+value
+        raise DMError("Unknown stat function.")
+    def run_plain_stat_function(self,name,args):
+        if name=='endure':
+            x,t,r=args
+            for _ in range(int(t)):x=x-(x*(r/100))
             return x
-        return sum(a[0])/len(a[0])
-    def eval_force(self,n,env):return apply_math_symbol(self.resolve_stat_value('STR',n['mode'],n['instance'],env),n['symbol'],self.eval_expr(n['value'],env))
-    def eval_sway(self,n,env):
+        if name=='perceive':return sum(args[0])/len(args[0])
+        raise DMError("Unknown built-in.")
+    def eval_force(self,node,env):return apply_math_symbol(self.resolve_stat_value('STR',node['mode'],node['instance'],env),node['symbol'],self.eval_expr(node['value'],env))
+    def eval_sway(self,node,env):
         if not self.block_stack:raise DMError("sway can't be used outside of a block.")
-        frame=self.block_stack[-1]
-        raw=self.eval_expr(n['address'],env)
-        target=self.find_sway_target(frame,raw)
-        if target is None:raise DMError(f"There's no line at address {raw} to move.")
-        owner,index,ancestor=target
+        frame=self.block_stack[-1];raw_address=self.eval_expr(node['address'],env);target=self.find_sway_target(frame,raw_address)
+        if target is None:raise DMError(f"There's no line at address {self.format_sway_address(raw_address)} to move.")
+        owner,index,ancestor_index=self._sway_target_parts(target)
         if owner is frame['statements']:
             if index<=frame['index']:raise DMError("You can't move a line that's already happened.")
             minimum=frame['index']+1
         else:
-            if ancestor<=frame['index']:raise DMError("You can't move a line that's already happened.")
+            if ancestor_index<=frame['index']:raise DMError("You can't move a line that's already happened.")
             minimum=0
-        dest=max(minimum,min(index+int(self.resolve_shift(n['shift'],n['instance'],env)),len(owner)-1));x=owner.pop(index);owner.insert(dest,x)
+        shift=self.resolve_shift(node['shift'],node['instance'],env);dest=max(minimum,min(index+int(shift),len(owner)-1));item=owner.pop(index);owner.insert(dest,item);return None
+    def format_sway_address(self,address):return address if isinstance(address,str) else str(address)
+    def _sway_target_parts(self,target):return target['owner'],target['index'],target['ancestor_index']
     def find_sway_target(self,frame,address):
         if isinstance(address,(int,float)) and not isinstance(address,bool) and float(address).is_integer():
-            i=int(address);s=frame['statements'];return {'owner':s,'index':i,'ancestor_index':i} if 0<=i<len(s) else None
+            i=int(address);stmts=frame['statements']
+            if 0<=i<len(stmts):return {'owner':stmts,'index':i,'ancestor_index':i}
+            return None
         text=str(address)
         if '.' not in text:return None
         major_text,minor_text=text.split('.',1)
         if not major_text.isdigit() or not minor_text.isdigit():return None
-        major,minor=int(major_text),int(minor_text);s=frame['statements']
-        if not 0<=major<len(s):return None
-        for block in self._statement_blocks(s[major]):
+        major,minor=int(major_text),int(minor_text);stmts=frame['statements']
+        if major<0 or major>=len(stmts):return None
+        parent=stmts[major]
+        for block in self._statement_blocks(parent):
             if 0<=minor<len(block):return {'owner':block,'index':minor,'ancestor_index':major}
         return None
     def _statement_blocks(self,stmt):
-        blocks=[];k=stmt.get('type')
-        if k in ('While','Adventure','ForParty','QuestDef','HomebrewDef','Submit') and isinstance(stmt.get('body'),list):blocks.append(stmt['body'])
-        if k=='Attempt':
-            for c in stmt.get('clauses',[]):
-                if isinstance(c.get('body'),list):blocks.append(c['body'])
+        blocks=[];kind=stmt.get('type')
+        if kind in ('While','Adventure','ForParty','QuestDef','HomebrewDef','Submit'):
+            if isinstance(stmt.get('body'),list):blocks.append(stmt['body'])
+        if kind=='Attempt':
+            for clause in stmt.get('clauses',[]):
+                if isinstance(clause.get('body'),list):blocks.append(clause['body'])
             if isinstance(stmt.get('fail_body'),list):blocks.append(stmt['fail_body'])
         return blocks
-    def resolve_shift(self,n,i,env):return n['value'] if n['type']=='ShiftLiteral' else self.resolve_stat_value(n['stat'] or 'CHA',n['mode'],i,env)
-    def resolve_stat_value(self,s,m,i,env):return (self.eval_expr(i,env)['STATS'] if i is not None else self.get_global_stats())[s][m]
-    def eval_solve(self,n,env):
-        i=self.eval_expr(n['instance'],env);d=self.eval_expr(n['difficulty'],env);size=i['STATS']['INT'][n['mode']];r=0 if size<=0 else random.randint(1,int(size));return {'/':r>d,'_':r==d,'\\':r<d,'/_':r>=d,'\\_':r<=d}[n['comparator']]
+    def resolve_shift(self,node,inst,env):return node['value'] if node['type']=='ShiftLiteral' else self.resolve_stat_value(node['stat'] or 'CHA',node['mode'],inst,env)
+    def resolve_stat_value(self,stat,mode,inst,env):
+        stats=self.eval_expr(inst,env)['STATS'] if inst is not None else self.get_global_stats()
+        if stat not in stats:raise DMError(f"'{stat}' isn't a stat there.")
+        return stats[stat][mode]
+    def get_global_stats(self):return self.global_stats if self.global_stats is not None else {s:{'number':10,'mod':0} for s in DEFAULT_STAT_NAMES}
 
-def apply_math_symbol(a,s,b):
-    if s=='+':return a+b
-    if s=='-':return a-b
-    if s=='*':return a*b
-    if s=='/':
+def apply_math_symbol(a,op,b):
+    if op=='+':return a+b
+    if op=='-':return a-b
+    if op=='*':return a*b
+    if op=='/':
         if b==0:raise DMError("You can't divide by zero.")
         return a/b
-    if s=='%':
+    if op=='%':
         if b==0:raise DMError("You can't divide by zero.")
         return a%b
-    raise DMError(f"Unknown math symbol '{s}'.")
+    raise DMError(f"Unknown math symbol '{op}'.")
 
 def coerce_input(raw):
-    try:s=raw.strip();return float(s) if '.' in s else int(s)
-    except (ValueError,AttributeError):return raw
+    text=raw.strip()
+    if text=='honor':return True
+    if text=='lie':return False
+    try:return float(text) if '.' in text else int(text)
+    except ValueError:return raw
