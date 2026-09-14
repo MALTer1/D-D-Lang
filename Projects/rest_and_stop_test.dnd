@@ -1,0 +1,12 @@
+-- D&D Lang execution control regression
+
+narrate "Starting..."
+short.rest(2)
+narrate "Short rest finished."
+long.rest(0.1)
+narrate "Long rest finished."
+
+ability steps = 0
+while (steps < 100):
+    steps += 1
+    short.rest(1)
